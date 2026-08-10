@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Menu, X, LayoutDashboard, HeartPulse } from 'lucide-react';
+import { motion } from 'motion/react';
 import { Button } from './ui/Button';
 
 interface NavbarProps {
@@ -17,14 +18,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onNavigateDashboard 
   ];
 
   return (
-    <header className="bg-surface/90 backdrop-blur-md border-b border-border sticky top-0 z-30 shadow-2xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 sm:h-20">
+    <motion.header
+      initial={{ y: -24, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      className="sticky top-3 sm:top-4 z-30 px-3 sm:px-6"
+    >
+      <div className="glass-nav max-w-6xl mx-auto rounded-2xl sm:rounded-3xl px-4 sm:px-6">
+        <div className="flex items-center justify-between h-14 sm:h-16">
           
           {/* Wordmark */}
           <a href="#" className="focus-ring rounded-lg flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <HeartPulse className="w-5 h-5 text-medical" />
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-medical to-wellness text-white flex items-center justify-center shrink-0 shadow-sm">
+              <HeartPulse className="w-5 h-5 text-white" />
             </div>
             <span className="font-heading font-bold text-xl sm:text-2xl tracking-tight text-primary">
               Campus<span className="text-medical">Care</span>
@@ -37,7 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onNavigateDashboard 
               <a
                 key={link.label}
                 href={link.href}
-                className="text-sm font-semibold text-ink-muted hover:text-primary transition-colors focus-ring rounded-md px-1 py-0.5"
+                className="text-sm font-semibold text-ink-muted hover:text-primary transition-colors focus-ring rounded-full px-3 py-1.5 hover:bg-white/60"
               >
                 {link.label}
               </a>
@@ -77,7 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onNavigateDashboard 
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               type="button"
-              className="p-2 text-ink-muted hover:text-ink focus-ring rounded-xl border border-border"
+              className="p-2 text-ink-muted hover:text-ink focus-ring rounded-xl glass-chip"
               aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -89,7 +95,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onNavigateDashboard 
 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-border bg-surface px-6 py-4 space-y-4 animate-in fade-in duration-150">
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className="md:hidden glass-nav max-w-6xl mx-auto mt-2 rounded-2xl px-6 py-4 space-y-4"
+        >
           <nav className="flex flex-col space-y-2">
             {navLinks.map((link) => (
               <a
@@ -138,9 +149,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, onNavigateDashboard 
               Sign Up
             </Button>
           </div>
-        </div>
+        </motion.div>
       )}
-    </header>
+    </motion.header>
   );
 };
 

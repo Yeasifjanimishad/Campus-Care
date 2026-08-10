@@ -2,8 +2,8 @@ import React from 'react';
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="bg-background border-t border-border py-8 text-xs text-ink-muted">
-      <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 flex flex-col sm:flex-row items-center justify-between gap-4">
+    <footer className="relative py-8 px-4 sm:px-6 text-xs text-ink-muted overflow-hidden">
+      <div className="glass-panel max-w-7xl mx-auto rounded-2xl px-6 sm:px-8 lg:px-12 py-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         
         {/* Wordmark & Copyright */}
         <div className="flex items-center gap-3">

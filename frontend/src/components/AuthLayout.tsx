@@ -1,5 +1,6 @@
 import React from 'react';
 import { ShieldCheck, Heart, Stethoscope, Lock, ArrowLeft } from 'lucide-react';
+import { motion } from 'motion/react';
 
 interface AuthLayoutProps {
   title: string;
@@ -17,10 +18,17 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
   children,
 }) => {
   return (
-    <div className="min-h-screen bg-background text-ink font-body flex flex-col selection:bg-medical/20 selection:text-ink">
-      
+    <div className="relative min-h-screen bg-background text-ink font-body flex flex-col selection:bg-medical/20 selection:text-ink overflow-hidden">
+
+      {/* Ambient Aurora Background */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div className="aurora-blob animate-aurora w-[480px] h-[480px] bg-medical/25 -top-32 -left-24" />
+        <div className="aurora-blob animate-aurora-slow w-[420px] h-[420px] bg-wellness/20 bottom-0 -right-24" />
+        <div className="aurora-blob animate-aurora w-[320px] h-[320px] bg-warm-accent/15 top-1/2 left-1/3" />
+      </div>
+
       {/* Simplified Header for Auth Pages */}
-      <header className="bg-surface border-b border-border sticky top-0 z-30">
+      <header className="glass-nav sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-12">
           <div className="flex items-center justify-between h-16 sm:h-20">
             
@@ -29,7 +37,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
               <button
                 onClick={() => onNavigate('landing')}
                 type="button"
-                className="p-2 text-ink-muted hover:text-primary hover:bg-background rounded-lg transition-colors focus-ring"
+                className="p-2 text-ink-muted hover:text-primary hover:bg-white/60 rounded-lg transition-colors focus-ring"
                 title="Return to Home"
                 aria-label="Return to Home"
               >
@@ -78,15 +86,20 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
       </header>
 
       {/* Main Split Layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12 flex items-center justify-center">
-        <div className="w-full bg-surface rounded-3xl border border-border overflow-hidden shadow-xs grid grid-cols-1 lg:grid-cols-12 min-h-[640px]">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12 flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, y: 28, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
+          className="glass-panel w-full rounded-3xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[640px]"
+        >
           
           {/* Left / Top Side: Flat Vector Illustration Panel */}
-          <div className="lg:col-span-5 bg-gradient-to-br from-[#1B4B66] via-[#2E7DAF] to-[#1B4B66] p-8 lg:p-12 text-surface flex flex-col justify-between relative overflow-hidden">
+          <div className="lg:col-span-5 bg-gradient-to-br from-[#0B2A3B] via-[#1B4B66] to-[#2E7DAF] p-8 lg:p-12 text-surface flex flex-col justify-between relative overflow-hidden">
             
             {/* Decorative Vector Graphic Background Elements */}
-            <div className="absolute top-0 right-0 -mt-12 -mr-12 w-64 h-64 rounded-full bg-illustration-blue/20 blur-2xl pointer-events-none" />
-            <div className="absolute bottom-0 left-0 -mb-12 -ml-12 w-64 h-64 rounded-full bg-warm-accent/20 blur-2xl pointer-events-none" />
+            <div className="absolute top-0 right-0 -mt-12 -mr-12 w-64 h-64 rounded-full bg-illustration-blue/30 blur-2xl pointer-events-none animate-aurora" />
+            <div className="absolute bottom-0 left-0 -mb-12 -ml-12 w-64 h-64 rounded-full bg-warm-accent/25 blur-2xl pointer-events-none animate-aurora-slow" />
 
             {/* Top Brand Tag */}
             <div className="relative z-10 space-y-2">
@@ -103,7 +116,12 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
 
             {/* Central Flat Vector Graphic (Custom SVG Illustration) */}
             <div className="relative z-10 py-8 my-auto flex flex-col items-center justify-center">
-              <div className="w-full max-w-xs relative aspect-4/3 bg-surface/10 rounded-2xl border border-surface/20 p-6 backdrop-blur-sm flex flex-col justify-between shadow-inner">
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                className="glass-dark w-full max-w-xs relative aspect-4/3 rounded-2xl p-6 flex flex-col justify-between"
+              >
                 
                 {/* Floating Badge 1 */}
                 <div className="absolute -top-4 -left-3 bg-surface text-ink px-3 py-1.5 rounded-xl border border-border shadow-sm flex items-center gap-2 text-xs font-semibold">
@@ -160,7 +178,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
                   </span>
                 </div>
 
-              </div>
+              </motion.div>
             </div>
 
             {/* Bottom Trust Note */}
@@ -175,8 +193,13 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
           </div>
 
           {/* Right / Main Side: Form Container */}
-          <div className="lg:col-span-7 p-6 sm:p-10 lg:p-14 flex flex-col justify-center">
-            <div className="max-w-md w-full mx-auto space-y-6">
+          <div className="lg:col-span-7 p-6 sm:p-10 lg:p-14 flex flex-col justify-center bg-white/40 backdrop-blur-xl">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+              className="max-w-md w-full mx-auto space-y-6"
+            >
               
               {/* Form Title & Subtitle */}
               <div className="space-y-1.5">
@@ -191,14 +214,14 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
               {/* Form Content Passed as Children */}
               {children}
 
-            </div>
+            </motion.div>
           </div>
 
-        </div>
+        </motion.div>
       </main>
 
       {/* Simplified Footer */}
-      <footer className="bg-surface border-t border-border py-4 text-xs text-ink-muted mt-auto">
+      <footer className="relative z-10 glass-panel border-t-0 py-4 text-xs text-ink-muted mt-auto">
         <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>&copy; {new Date().getFullYear()} CampusCare Platform. University Health Services.</span>
           <div className="flex items-center space-x-4">
