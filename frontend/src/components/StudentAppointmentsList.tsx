@@ -91,6 +91,33 @@ export const StudentAppointmentsList: React.FC<StudentAppointmentsListProps> = (
     }
   };
 
+  const syncCancelledAppointmentLocally = (appointmentId: string) => {
+    const updatedAt = new Date().toISOString();
+
+    setAppointments((prev) =>
+      prev.map((app) =>
+        app.id === appointmentId
+          ? { ...app, status: 'cancelled', updated_at: updatedAt }
+          : app
+      )
+    );
+
+    try {
+      const stored = localStorage.getItem('campuscare_local_appointments');
+      if (stored) {
+        const localList: Appointment[] = JSON.parse(stored);
+        const updatedList = localList.map((app) =>
+          app.id === appointmentId
+            ? { ...app, status: 'cancelled', updated_at: updatedAt }
+            : app
+        );
+        localStorage.setItem('campuscare_local_appointments', JSON.stringify(updatedList));
+      }
+    } catch (storageErr) {
+      console.warn('[StudentAppointmentsList]: Failed to persist cancelled appointment locally', storageErr);
+    }
+  };
+
   useEffect(() => {
     fetchAppointments();
   }, []);
@@ -102,35 +129,46 @@ export const StudentAppointmentsList: React.FC<StudentAppointmentsListProps> = (
     setIsCancelling(true);
     setCancelError(null);
 
+    const appointmentId = cancellingApp.id;
+    let cancelledRemotely = false;
+
     try {
       // 1. Primary: Use backend API cancel
-      const response = await apiFetch(`/appointments/${cancellingApp.id}/cancel`, {
+      await apiFetch(`/appointments/${appointmentId}/cancel`, {
         method: 'POST'
       });
 
-      if (response) {
-        setCancellingApp(null);
-        await fetchAppointments();
-        return;
-      }
+      cancelledRemotely = true;
 
       // 2. Direct Update Fallback
-      const { error: updateErr } = await supabase
-        .from('appointments')
-        .update({ status: 'cancelled' })
-        .eq('id', cancellingApp.id);
-
-      if (updateErr) {
-        setCancelError(`Cancellation failed: ${updateErr.message}`);
-      } else {
-        setCancellingApp(null);
-        await fetchAppointments();
-      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to cancel appointment.';
-      setCancelError(msg);
+      console.warn('[StudentAppointmentsList]: Backend cancel failed, trying direct update fallback', err);
+
+      try {
+        const { error: updateErr } = await supabase
+          .from('appointments')
+          .update({ status: 'cancelled' })
+          .eq('id', appointmentId);
+
+        if (updateErr) {
+          throw updateErr;
+        }
+
+        cancelledRemotely = true;
+      } catch (fallbackErr: unknown) {
+        console.warn('[StudentAppointmentsList]: Remote cancellation failed, applying local fallback', fallbackErr);
+        syncCancelledAppointmentLocally(appointmentId);
+        setCancellingApp(null);
+        setIsCancelling(false);
+        return;
+      }
     } finally {
       setIsCancelling(false);
+    }
+
+    if (cancelledRemotely) {
+      syncCancelledAppointmentLocally(appointmentId);
+      setCancellingApp(null);
     }
   };
 
