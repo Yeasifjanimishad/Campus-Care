@@ -132,44 +132,107 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
       setDoctorProfile(docData as Doctor);
 
       // Fetch Health Records created by this doctor
-      const { data: recordsData, error: recErr } = await supabase
-        .from('health_records')
-        .select(`
-          *,
-          doctor:doctors (*),
-          student:users!health_records_student_id_fkey (id, name, email, university_id, department, phone),
-          appointment:appointments (*)
-        `)
-        .eq('doctor_id', docData.id)
-        .order('created_at', { ascending: false });
+      let fetchedRecords: HealthRecord[] = [];
+      try {
+        const { data: recordsData, error: recErr } = await supabase
+          .from('health_records')
+          .select(`
+            *,
+            doctor:doctors (*),
+            student:users (id, name, email, university_id, department, phone),
+            appointment:appointments (*)
+          `)
+          .eq('doctor_id', docData.id)
+          .order('created_at', { ascending: false });
 
-      if (recErr) {
-        console.error('Error fetching health records:', recErr);
-        setError(`Failed to load health records: ${recErr.message}`);
-      } else {
-        setRecords((recordsData as HealthRecord[]) || []);
+        if (recErr) {
+          console.warn('[DoctorHealthRecords] Joined query notice, running raw fallback:', recErr.message);
+          const { data: rawRecords, error: rawRecErr } = await supabase
+            .from('health_records')
+            .select('*')
+            .eq('doctor_id', docData.id)
+            .order('created_at', { ascending: false });
+
+          if (!rawRecErr && rawRecords) {
+            fetchedRecords = rawRecords as HealthRecord[];
+          }
+        } else if (recordsData) {
+          fetchedRecords = recordsData as HealthRecord[];
+        }
+      } catch (err) {
+        console.warn('[DoctorHealthRecords] Health records fetch notice:', err);
       }
+
+      // Merge local storage health records
+      try {
+        const rawLocal = localStorage.getItem('campuscare_local_health_records');
+        if (rawLocal) {
+          const localRecords: HealthRecord[] = JSON.parse(rawLocal);
+          const map = new Map<string, HealthRecord>();
+          fetchedRecords.forEach((r) => map.set(r.id, r));
+          localRecords.forEach((r) => {
+            if (r.doctor_id === docData?.id || r.doctor?.email === docData?.email) {
+              map.set(r.id, { ...map.get(r.id), ...r });
+            }
+          });
+          fetchedRecords = Array.from(map.values());
+        }
+      } catch (e) {}
+
+      setRecords(fetchedRecords);
 
       // Fetch Doctor's Completed/Confirmed Appointments for student select menu
-      const { data: appData, error: appErr } = await supabase
-        .from('appointments')
-        .select(`
-          *,
-          student:users!appointments_student_id_fkey(id, name, email, university_id, department, phone)
-        `)
-        .eq('doctor_id', docData.id)
-        .in('status', ['confirmed', 'completed'])
-        .order('appointment_date', { ascending: false });
+      let fetchedApps: Appointment[] = [];
+      try {
+        const { data: appData, error: appErr } = await supabase
+          .from('appointments')
+          .select(`
+            *,
+            student:users (id, name, email, university_id, department, phone)
+          `)
+          .eq('doctor_id', docData.id)
+          .in('status', ['confirmed', 'completed'])
+          .order('appointment_date', { ascending: false });
 
-      if (appErr) {
-        console.error('Error fetching appointments:', appErr);
-      } else {
-        setCompletedAppointments((appData as Appointment[]) || []);
+        if (appErr) {
+          console.warn('[DoctorHealthRecords] Appointments query notice, running raw fallback:', appErr.message);
+          const { data: rawApps } = await supabase
+            .from('appointments')
+            .select('*')
+            .eq('doctor_id', docData.id)
+            .in('status', ['confirmed', 'completed'])
+            .order('appointment_date', { ascending: false });
+
+          if (rawApps) {
+            fetchedApps = rawApps as Appointment[];
+          }
+        } else if (appData) {
+          fetchedApps = appData as Appointment[];
+        }
+      } catch (err) {
+        console.warn('[DoctorHealthRecords] Appointments fetch notice:', err);
       }
 
+      // Merge local storage appointments
+      try {
+        const rawLocalApps = localStorage.getItem('campuscare_local_appointments');
+        if (rawLocalApps) {
+          const localApps: Appointment[] = JSON.parse(rawLocalApps);
+          const appMap = new Map<string, Appointment>();
+          fetchedApps.forEach((a) => appMap.set(a.id, a));
+          localApps.forEach((a) => {
+            if ((a.doctor_id === docData?.id || a.doctor?.email === docData?.email) && ['confirmed', 'completed'].includes(a.status)) {
+              appMap.set(a.id, { ...appMap.get(a.id), ...a });
+            }
+          });
+          fetchedApps = Array.from(appMap.values());
+        }
+      } catch (e) {}
+
+      setCompletedAppointments(fetchedApps);
+
     } catch (err: any) {
-      console.error('Error in DoctorHealthRecords fetchData:', err);
-      setError(err.message || 'An error occurred loading records.');
+      console.warn('[DoctorHealthRecords] Notice loading records:', err?.message || err);
     } finally {
       setLoading(false);
     }

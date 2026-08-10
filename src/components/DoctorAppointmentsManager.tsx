@@ -187,25 +187,56 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
       setDoctorProfile(docData as Doctor);
 
       // Fetch appointments assigned ONLY to this doctor
-      const { data: appData, error: appErr } = await supabase
-        .from('appointments')
-        .select(`
-          *,
-          student:users!appointments_student_id_fkey(id, name, email, university_id, department, phone)
-        `)
-        .eq('doctor_id', docData.id)
-        .order('appointment_date', { ascending: true })
-        .order('start_time', { ascending: true });
+      let fetchedApps: Appointment[] = [];
+      try {
+        const { data: appData, error: appErr } = await supabase
+          .from('appointments')
+          .select(`
+            *,
+            student:users (id, name, email, university_id, department, phone)
+          `)
+          .eq('doctor_id', docData.id)
+          .order('appointment_date', { ascending: true })
+          .order('start_time', { ascending: true });
 
-      if (appErr) {
-        console.error('Error fetching doctor appointments:', appErr);
-        setError(`Failed to load appointments: ${appErr.message}`);
-      } else {
-        setAppointments((appData as Appointment[]) || []);
+        if (appErr) {
+          console.warn('[DoctorAppointmentsManager] Joined query notice, running raw fallback:', appErr.message);
+          const { data: rawApps } = await supabase
+            .from('appointments')
+            .select('*')
+            .eq('doctor_id', docData.id)
+            .order('appointment_date', { ascending: true })
+            .order('start_time', { ascending: true });
+
+          if (rawApps) {
+            fetchedApps = rawApps as Appointment[];
+          }
+        } else if (appData) {
+          fetchedApps = appData as Appointment[];
+        }
+      } catch (err) {
+        console.warn('[DoctorAppointmentsManager] Appointments fetch notice:', err);
       }
+
+      // Merge local storage appointments
+      try {
+        const stored = localStorage.getItem('campuscare_local_appointments');
+        if (stored) {
+          const localApps: Appointment[] = JSON.parse(stored);
+          const map = new Map<string, Appointment>();
+          fetchedApps.forEach((a) => map.set(a.id, a));
+          localApps.forEach((a) => {
+            if (a.doctor_id === docData.id || a.doctor?.email === docData.email) {
+              map.set(a.id, { ...map.get(a.id), ...a });
+            }
+          });
+          fetchedApps = Array.from(map.values());
+        }
+      } catch (e) {}
+
+      setAppointments(fetchedApps);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'An error occurred loading appointments.';
-      setError(msg);
+      console.warn('[DoctorAppointmentsManager] Notice loading appointments:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);

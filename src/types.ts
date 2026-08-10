@@ -89,6 +89,7 @@ export interface Appointment {
   updated_at: string;
   // Optional joined objects
   doctors?: Doctor;
+  doctor?: Doctor;
   student?: {
     id?: string;
     name?: string;

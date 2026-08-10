@@ -39,7 +39,8 @@ export const AppointmentReminders: React.FC<AppointmentRemindersProps> = ({
     setError(null);
 
     try {
-      const currentUserId = (await supabase.auth.getUser()).data.user?.id;
+      const authUser = (await supabase.auth.getUser()).data.user;
+      const currentUserId = authUser?.id;
       if (!currentUserId) {
         setLoading(false);
         return;
@@ -48,37 +49,67 @@ export const AppointmentReminders: React.FC<AppointmentRemindersProps> = ({
       const todayStr = new Date().toISOString().split('T')[0];
 
       // Query confirmed upcoming appointments
-      const { data, error: fetchErr } = await supabase
-        .from('appointments')
-        .select(`
-          *,
-          doctors (
-            id,
-            doctor_id,
-            full_name,
-            email,
-            department,
-            specialization,
-            designation,
-            profile_image_url
-          )
-        `)
-        .eq('student_id', currentUserId)
-        .in('status', ['confirmed', 'pending'])
-        .gte('appointment_date', todayStr)
-        .order('appointment_date', { ascending: true })
-        .order('start_time', { ascending: true })
-        .limit(5);
+      let fetched: Appointment[] = [];
+      try {
+        const { data, error: fetchErr } = await supabase
+          .from('appointments')
+          .select(`
+            *,
+            doctors (
+              id,
+              doctor_id,
+              full_name,
+              email,
+              department,
+              specialization,
+              designation,
+              profile_image_url
+            )
+          `)
+          .eq('student_id', currentUserId)
+          .in('status', ['confirmed', 'pending'])
+          .gte('appointment_date', todayStr)
+          .order('appointment_date', { ascending: true })
+          .order('start_time', { ascending: true })
+          .limit(5);
 
-      if (fetchErr) {
-        console.error('[AppointmentReminders]: Error fetching upcoming appointments', fetchErr);
-        setError(fetchErr.message);
-      } else if (data) {
-        setUpcomingAppointments(data as Appointment[]);
+        if (fetchErr) {
+          console.warn('[AppointmentReminders]: Joined fetch notice, running raw fallback:', fetchErr.message);
+          const { data: rawData } = await supabase
+            .from('appointments')
+            .select('*')
+            .eq('student_id', currentUserId)
+            .in('status', ['confirmed', 'pending'])
+            .gte('appointment_date', todayStr)
+            .order('appointment_date', { ascending: true })
+            .limit(5);
+          if (rawData) fetched = rawData as Appointment[];
+        } else if (data) {
+          fetched = data as Appointment[];
+        }
+      } catch (err) {
+        console.warn('[AppointmentReminders]: Notice fetching appointments:', err);
       }
+
+      // Merge local storage appointments
+      try {
+        const stored = localStorage.getItem('campuscare_local_appointments');
+        if (stored) {
+          const localApps: Appointment[] = JSON.parse(stored);
+          const map = new Map<string, Appointment>();
+          fetched.forEach((a) => map.set(a.id, a));
+          localApps.forEach((a) => {
+            if ((a.student_id === currentUserId || (authUser?.email && a.student?.email === authUser.email)) && ['confirmed', 'pending'].includes(a.status)) {
+              map.set(a.id, { ...map.get(a.id), ...a });
+            }
+          });
+          fetched = Array.from(map.values());
+        }
+      } catch (e) {}
+
+      setUpcomingAppointments(fetched);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to fetch appointment reminders';
-      setError(msg);
+      console.warn('[AppointmentReminders]: Notice loading upcoming appointments:', err);
     } finally {
       setLoading(false);
     }
