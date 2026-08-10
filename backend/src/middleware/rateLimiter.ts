@@ -5,7 +5,6 @@ import { Request, Response } from 'express';
 export const defaultRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: 100,
-  keyGenerator: ipKeyGenerator,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -22,7 +21,6 @@ export const defaultRateLimiter = rateLimit({
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: 10,
-  keyGenerator: ipKeyGenerator,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -39,7 +37,6 @@ export const authRateLimiter = rateLimit({
 export const publicEndpointLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   limit: 5,
-  keyGenerator: ipKeyGenerator,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -58,7 +55,7 @@ export const sosRateLimiter = rateLimit({
   limit: 3,
   keyGenerator: (req: Request) => {
     // If authenticated, rate limit per user id, otherwise use the proper ipKeyGenerator helper
-    return (req as any).user?.id || ipKeyGenerator(req as any);
+    return (req as any).user?.id || ipKeyGenerator(req.ip || 'unknown');
   },
   standardHeaders: 'draft-8',
   legacyHeaders: false,
