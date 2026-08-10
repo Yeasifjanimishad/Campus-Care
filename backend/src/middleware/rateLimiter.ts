@@ -27,7 +27,7 @@ export const defaultRateLimiter = rateLimit({
 // 2. Auth Endpoints Rate Limiter: 10 login / signup attempts per 15 minutes per IP
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 10,
+  limit: 100,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -43,7 +43,7 @@ export const authRateLimiter = rateLimit({
 // 3. Public Endpoints (e.g. Doctor Request Access): 5 requests per hour per IP
 export const publicEndpointLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  limit: 5,
+  limit: 10,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -59,7 +59,7 @@ export const publicEndpointLimiter = rateLimit({
 // 4. SOS Endpoint Rate Limiter: 3 requests per minute per user (to prevent spam)
 export const sosRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  limit: 3,
+  limit: 10,
   keyGenerator: (req: Request) => {
     // If authenticated, rate limit per user id, otherwise fallback to normalized IP
     return (req as any).user?.id || ipKeyGenerator(req, {} as Response);
