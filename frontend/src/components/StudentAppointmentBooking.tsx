@@ -359,7 +359,10 @@ export const StudentAppointmentBooking: React.FC<StudentAppointmentBookingProps>
         return;
       }
     } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.warn('[StudentAppointmentBooking] Exception booking appointment:', err);
+      setBookingError(`Unable to create appointment: ${errorMessage}`);
+      return;
     } finally {
       setIsSubmitting(false);
     }

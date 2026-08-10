@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { supabaseAdmin } from '../lib/supabase.js';
 
-let cronTask: cron.ScheduledTask | null = null;
+let cronTask: ReturnType<typeof cron.schedule> | null = null;
 let lastExecutionResult: any = {
   status: 'healthy',
   executed_at: new Date().toISOString(),

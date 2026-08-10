@@ -1090,10 +1090,11 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_student_id UUID;
-  v_conflict_count INT;
-  v_doctor RECORD;
-  v_new_appointment RECORD;
+  v_doctor public.doctors%ROWTYPE;
+  v_conflict_count INTEGER;
+  v_new_appointment_id UUID;
 BEGIN
+  -- 1. Determine student ID
   IF p_student_id IS NOT NULL AND public.is_admin() THEN
     v_student_id := p_student_id::UUID;
   ELSE
@@ -1104,11 +1105,13 @@ BEGIN
     RAISE EXCEPTION 'Authentication required to book an appointment.';
   END IF;
 
-  SELECT * INTO v_doctor FROM public.doctors WHERE id = p_doctor_id AND is_available = true;
+  -- 2. Validate doctor exists and is available
+  SELECT * INTO v_doctor FROM public.doctors WHERE (id = p_doctor_id OR user_id = p_doctor_id) AND is_available = true;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Selected doctor is not available for appointments.';
   END IF;
 
+  -- 3. Validate times
   IF p_appointment_date < CURRENT_DATE THEN
     RAISE EXCEPTION 'Cannot schedule appointments in the past.';
   END IF;
@@ -1117,9 +1120,10 @@ BEGIN
     RAISE EXCEPTION 'Start time must precede end time.';
   END IF;
 
+  -- 4. Check for overlapping appointments
   SELECT COUNT(*) INTO v_conflict_count
   FROM public.appointments
-  WHERE doctor_id = p_doctor_id
+  WHERE doctor_id = v_doctor.id
     AND appointment_date = p_appointment_date
     AND status IN ('pending', 'confirmed')
     AND (
@@ -1129,29 +1133,33 @@ BEGIN
     );
 
   IF v_conflict_count > 0 THEN
-    RAISE EXCEPTION 'The selected time slot is already booked for this doctor.';
+    RAISE EXCEPTION 'The selected time slot is already booked. Please choose another time.';
   END IF;
 
+  -- 5. Insert new appointment
   INSERT INTO public.appointments (
     student_id,
     doctor_id,
     appointment_date,
+    date,
     start_time,
     end_time,
+    time_slot,
     status,
     reason,
     symptoms
   ) VALUES (
     v_student_id,
-    p_doctor_id,
+    v_doctor.id,
+    p_appointment_date,
     p_appointment_date,
     p_start_time,
     p_end_time,
+    to_char(p_start_time, 'HH24:MI') || ' - ' || to_char(p_end_time, 'HH24:MI'),
     'pending',
     TRIM(p_reason),
     TRIM(p_symptoms)
-  )
-  RETURNING * INTO v_new_appointment;
+  ) RETURNING id INTO v_new_appointment_id;
 
   -- Create in-app notification for the doctor user if registered
   IF v_doctor.user_id IS NOT NULL THEN
@@ -1176,7 +1184,9 @@ BEGIN
 
   RETURN jsonb_build_object(
     'success', true,
-    'appointment', row_to_json(v_new_appointment)
+    'id', v_new_appointment_id,
+    'appointment_id', v_new_appointment_id,
+    'message', 'Appointment created successfully.'
   );
 END;
 $$;

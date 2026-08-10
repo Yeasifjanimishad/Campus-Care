@@ -104,6 +104,11 @@ export const loginSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters long'),
 });
 
+export const doctorLoginSchema = z.object({
+  doctor_id: z.string().min(1, 'Doctor ID is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters long'),
+});
+
 export const signupSchema = z.object({
   email: z
     .string()
@@ -170,12 +175,13 @@ export const createAppointmentSchema = z.object({
   start_time: z.string().min(3, 'Start time is required'),
   end_time: z.string().optional(),
   reason: z.string().min(3, 'Reason for appointment must be at least 3 characters'),
-  symptoms: z.union([z.array(z.string()), z.string()]).optional(),
+  symptoms: z.union([z.array(z.string()), z.string()]).optional().nullable(),
+  student_note: z.string().optional().nullable(),
 });
 
 export const updateAppointmentStatusSchema = z.object({
   status: z.enum(
-    ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'],
+    ['pending', 'confirmed', 'completed', 'cancelled', 'rejected'],
     {
       errorMap: () => ({ message: 'Invalid appointment status' }),
     }

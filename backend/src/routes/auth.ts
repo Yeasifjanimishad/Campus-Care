@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireAuth } from '../middleware/auth.js';
 import { authRateLimiter } from '../middleware/rateLimiter.js';
-import { validateBody, loginSchema, signupSchema } from '../middleware/validator.js';
+import { validateBody, loginSchema, signupSchema, doctorLoginSchema } from '../middleware/validator.js';
 import { AppError } from '../lib/errors.js';
 
 const router = Router();
@@ -102,6 +102,53 @@ router.post('/login', validateBody(loginSchema), async (req, res, next) => {
 
     return res.json({
       user: profile,
+      session: authData.session,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/auth/doctor-login
+router.post('/doctor-login', validateBody(doctorLoginSchema), async (req, res, next) => {
+  try {
+    const { doctor_id, password } = req.body;
+    
+    // 1. Look up the doctor's email using university_id (where doctor_id is stored)
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('users')
+      .select('email, id, status, role')
+      .eq('university_id', doctor_id)
+      .eq('role', 'doctor')
+      .single();
+      
+    if (profileError || !profile) {
+      throw new AppError(404, 'Doctor profile not found. Please check your Doctor ID.');
+    }
+    
+    if (profile.status !== 'active' && profile.status !== 'pending') {
+      throw new AppError(403, `Account is ${profile.status}`);
+    }
+
+    // 2. Authenticate with Supabase using the retrieved email
+    const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
+      email: profile.email,
+      password,
+    });
+
+    if (authError || !authData?.user || !authData?.session) {
+      throw new AppError(401, 'Invalid credentials', authError?.message);
+    }
+    
+    // 3. Fetch full profile to return
+    const { data: fullProfile } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('id', authData.user.id)
+      .single();
+
+    return res.json({
+      user: fullProfile || profile,
       session: authData.session,
     });
   } catch (error) {

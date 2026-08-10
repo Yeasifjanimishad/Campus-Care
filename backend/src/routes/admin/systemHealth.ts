@@ -23,7 +23,7 @@ router.get('/events', requireAuth, requireAdmin, async (req, res, next) => {
         .select('*', { count: 'exact' });
 
       if (resolved !== undefined) {
-        const isResolved = resolved === 'true' || resolved === true || resolved === '1';
+        const isResolved = resolved === 'true' || resolved === '1';
         query = query.eq('resolved', isResolved);
       }
 

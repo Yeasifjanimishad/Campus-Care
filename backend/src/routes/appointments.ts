@@ -12,18 +12,22 @@ router.post('/', requireAuth, requireRole('student_faculty'), validateBody(creat
     const { doctor_id, appointment_date, start_time, end_time, reason, symptoms, student_note } = req.body;
 
     const authClient = createAuthClient(req.token!);
+    let combinedSymptoms = symptoms || null;
+    if (student_note) {
+      combinedSymptoms = combinedSymptoms ? `${combinedSymptoms}\n\nNote: ${student_note}` : `Note: ${student_note}`;
+    }
+
     const { data, error } = await authClient.rpc('create_appointment', {
       p_doctor_id: doctor_id,
       p_appointment_date: appointment_date,
       p_start_time: start_time,
       p_end_time: end_time,
       p_reason: reason,
-      p_symptoms: symptoms || null,
-      p_student_note: student_note || null
+      p_symptoms: combinedSymptoms
     });
 
     if (error) {
-      throw new AppError(500, 'Failed to create appointment', error.message);
+      throw new AppError(500, 'Failed to create appointment: ' + error.message, error.message);
     }
 
     return res.status(201).json(data);
