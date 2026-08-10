@@ -22,6 +22,7 @@ import {
   Save
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { UserProfile, HealthRecord, Appointment, Doctor } from '../types';
 
 interface DoctorHealthRecordsProps {

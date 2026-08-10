@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { createAuthClient, supabaseAdmin } from '../lib/supabase.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { sosRateLimiter } from '../middleware/rateLimiter.js';
+import { validateBody, createSosSchema } from '../middleware/validator.js';
 import { AppError } from '../lib/errors.js';
 
 const router = Router();
@@ -9,7 +11,7 @@ const router = Router();
 const MOCK_SOS_ALERTS: any[] = [];
 
 // POST /api/sos
-router.post('/', requireAuth, requireRole('student_faculty'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('student_faculty'), sosRateLimiter, validateBody(createSosSchema), async (req, res, next) => {
   try {
     const { latitude, longitude, accuracy, emergency_type, message } = req.body;
 

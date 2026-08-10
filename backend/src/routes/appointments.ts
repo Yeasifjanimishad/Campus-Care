@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabaseAdmin, createAuthClient } from '../lib/supabase.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { validateBody, createAppointmentSchema } from '../middleware/validator.js';
 import { AppError } from '../lib/errors.js';
 
 const router = Router();
@@ -8,13 +9,9 @@ const router = Router();
 const MOCK_APPOINTMENTS: any[] = [];
 
 // POST /api/appointments
-router.post('/', requireAuth, requireRole('student_faculty'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('student_faculty'), validateBody(createAppointmentSchema), async (req, res, next) => {
   try {
     const { doctor_id, appointment_date, start_time, end_time, reason, symptoms, student_note } = req.body;
-
-    if (!doctor_id || !appointment_date || !start_time || !end_time || !reason) {
-      throw new AppError(400, 'Missing required fields');
-    }
 
     try {
       const authClient = createAuthClient(req.token!);
@@ -76,8 +73,15 @@ router.get('/', requireAuth, async (req, res, next) => {
           student:users!appointments_student_id_fkey(name, email, phone)
         `, { count: 'exact' });
 
-      if (status) query = query.eq('status', status);
+      if (status) {
+        if (typeof status === 'string' && status.includes(',')) {
+          query = query.in('status', status.split(','));
+        } else {
+          query = query.eq('status', status);
+        }
+      }
       if (date) query = query.eq('appointment_date', date);
+      if (req.query.date_from) query = query.gte('appointment_date', req.query.date_from as string);
       if (doctor_id) query = query.eq('doctor_id', doctor_id);
 
       const offset = (pageNum - 1) * limitNum;

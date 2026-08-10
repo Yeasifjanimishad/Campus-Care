@@ -20,6 +20,7 @@ import {
   Info
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { isSupabaseConfigured } from '../lib/supabase';
 import { Broadcast, UserProfile, BroadcastCategory, BroadcastPriority, BroadcastTargetRole } from '../types';
 
 interface AdminBroadcastManagerProps {

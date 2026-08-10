@@ -1,19 +1,11 @@
 import { Router } from 'express';
-import { rateLimit } from 'express-rate-limit';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { publicEndpointLimiter } from '../middleware/rateLimiter.js';
+import { validateBody, createDoctorRequestSchema } from '../middleware/validator.js';
 import { AppError } from '../lib/errors.js';
 
 const router = Router();
-
-// Rate limiter for public requests (max 5 per IP per hour)
-const publicRequestLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  limit: 5,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: { error: { message: 'Too many requests from this IP, please try again after an hour' } }
-});
 
 // GET /api/doctor-requests/check-duplicate
 router.get('/check-duplicate', async (req, res, next) => {
@@ -39,13 +31,9 @@ router.get('/check-duplicate', async (req, res, next) => {
 });
 
 // POST /api/doctor-requests
-router.post('/', publicRequestLimiter, async (req, res, next) => {
+router.post('/', publicEndpointLimiter, validateBody(createDoctorRequestSchema), async (req, res, next) => {
   try {
     const { full_name, email, doctor_id, department, phone, message } = req.body;
-
-    if (!full_name || !email || !doctor_id) {
-      throw new AppError(400, 'Missing required fields');
-    }
 
     const cleanEmail = email.toLowerCase();
     

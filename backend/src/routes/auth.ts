@@ -1,22 +1,19 @@
 import { Router } from 'express';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { requireAuth, MOCK_PROFILES_BY_EMAIL } from '../middleware/auth.js';
+import { authRateLimiter } from '../middleware/rateLimiter.js';
+import { validateBody, loginSchema, signupSchema } from '../middleware/validator.js';
 import { AppError } from '../lib/errors.js';
 
 const router = Router();
 
+// Apply auth rate limiter to all auth routes
+router.use(authRateLimiter);
+
 // POST /api/auth/signup
-router.post('/signup', async (req, res, next) => {
+router.post('/signup', validateBody(signupSchema), async (req, res, next) => {
   try {
     const { email, password, name, university_id, department, phone } = req.body;
-    
-    if (!email || !password || !name || !university_id) {
-      throw new AppError(400, 'Missing required fields');
-    }
-    
-    if (!email.endsWith('@diu.edu.bd')) {
-      throw new AppError(400, 'Only @diu.edu.bd email addresses are allowed for signup');
-    }
 
     // Try regular signUp instead of admin.createUser as it works with anon keys too
     const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
@@ -75,14 +72,9 @@ router.post('/signup', async (req, res, next) => {
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res, next) => {
+router.post('/login', validateBody(loginSchema), async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    
-    if (!email || !password) {
-      throw new AppError(400, 'Missing email or password');
-    }
-
     const cleanEmail = email.trim().toLowerCase();
 
     try {
@@ -169,11 +161,17 @@ router.get('/session', requireAuth, async (req, res, next) => {
       .single();
 
     if (profileError || !profile) {
+      if (req.user) {
+        return res.json({ user: req.user });
+      }
       throw new AppError(404, 'User profile not found');
     }
 
     res.json({ user: profile });
   } catch (error) {
+    if (req.user) {
+      return res.json({ user: req.user });
+    }
     next(error);
   }
 });

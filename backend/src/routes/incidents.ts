@@ -74,7 +74,13 @@ router.get('/', requireAuth, async (req, res, next) => {
           reporter:users!reporter_id(name, email, university_id, department, phone)
         `, { count: 'exact' });
 
-      if (status) query = query.eq('status', status);
+      if (status) {
+        if (typeof status === 'string' && status.includes(',')) {
+          query = query.in('status', status.split(','));
+        } else {
+          query = query.eq('status', status);
+        }
+      }
       if (category) query = query.eq('category', category);
 
       if (req.user?.role === 'student_faculty') {
@@ -103,7 +109,10 @@ router.get('/', requireAuth, async (req, res, next) => {
     if (req.user?.role === 'student_faculty') {
       filtered = filtered.filter(i => i.reporter_id === req.user?.id);
     }
-    if (status) filtered = filtered.filter(i => i.status === status);
+    if (status) {
+      const statuses = typeof status === 'string' ? status.split(',') : [status];
+      filtered = filtered.filter(i => statuses.includes(i.status));
+    }
     if (category) filtered = filtered.filter(i => i.category === category);
     filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 

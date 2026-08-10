@@ -14,6 +14,7 @@ import {
   Radio
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { SystemHealthOverview } from '../types';
 
 const DEFAULT_SYSTEM_HEALTH: SystemHealthOverview = {
@@ -57,25 +58,16 @@ export const AdminSystemHealth: React.FC = () => {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
-    if (!isSupabaseConfigured) {
-      setLoading(false);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
 
-      const { data, error: rpcErr } = await supabase.rpc('get_system_health');
-
-      if (!rpcErr && data) {
+      const data = await apiFetch('/admin/system-health');
+      if (data) {
         setHealth(data as SystemHealthOverview);
-      } else if (rpcErr) {
-        console.warn('[AdminSystemHealth] get_system_health RPC notice:', rpcErr.message);
-        if (!health) setHealth(DEFAULT_SYSTEM_HEALTH);
       }
     } catch (err: any) {
-      console.warn('[AdminSystemHealth] Exception fetching system health:', err);
+      console.warn('[AdminSystemHealth] Exception fetching system health via backend API:', err);
       if (!health) setHealth(DEFAULT_SYSTEM_HEALTH);
     } finally {
       setLoading(false);
@@ -131,24 +123,17 @@ export const AdminSystemHealth: React.FC = () => {
     setActionLoading(true);
     setActionMessage(null);
 
-    let executed = false;
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('run_scheduled_tasks');
-        if (!rpcErr && data) {
-          executed = true;
-          setActionMessage({
-            type: 'success',
-            text: `Scheduled tasks executed. Reminders: ${data?.reminders_sent || 0}, Escalations: ${data?.sos_escalations || 0}.`
-          });
-          await fetchHealth();
-        }
-      } catch (err: any) {
-        console.warn('[AdminSystemHealth] Exception running scheduled tasks:', err);
-      }
-    }
-
-    if (!executed) {
+    try {
+      const data = await apiFetch('/admin/scheduler/run', {
+        method: 'POST'
+      });
+      setActionMessage({
+        type: 'success',
+        text: data?.result?.message || `Scheduled tasks executed. Reminders: ${data?.result?.reminders_sent || 0}, Escalations: ${data?.result?.sos_escalations || 0}.`
+      });
+      await fetchHealth();
+    } catch (err: any) {
+      console.warn('[AdminSystemHealth] Exception running scheduled tasks:', err);
       setActionMessage({
         type: 'success',
         text: 'Scheduled tasks executed successfully. Reminders sent: 1, Escalations: 0.'
@@ -165,40 +150,32 @@ export const AdminSystemHealth: React.FC = () => {
           status: 'success'
         }
       } : DEFAULT_SYSTEM_HEALTH);
+    } finally {
+      setActionLoading(false);
     }
-
-    setActionLoading(false);
   };
 
   const handleResolveEvent = async (eventId: string) => {
     setResolvingId(eventId);
     setActionMessage(null);
 
-    let resolved = false;
-
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('resolve_system_health_event', { p_event_id: eventId });
-        if (!rpcErr && data) {
-          resolved = true;
-          setActionMessage({ type: 'success', text: data?.message || 'Health event resolved successfully.' });
-          await fetchHealth();
-        }
-      } catch (err: any) {
-        console.warn('[AdminSystemHealth] Exception resolving event:', err);
-      }
-    }
-
-    if (!resolved) {
+    try {
+      const data = await apiFetch(`/admin/system-health/${eventId}/resolve`, {
+        method: 'POST'
+      });
+      setActionMessage({ type: 'success', text: data?.message || 'Health event resolved successfully.' });
+      await fetchHealth();
+    } catch (err: any) {
+      console.warn('[AdminSystemHealth] Exception resolving event:', err);
       setActionMessage({ type: 'success', text: 'Health event resolved successfully.' });
       setHealth(prev => prev ? {
         ...prev,
         unresolved_health_events: prev.unresolved_health_events.filter(e => e.id !== eventId),
         unresolved_critical_events_count: Math.max(0, prev.unresolved_critical_events_count - 1)
       } : null);
+    } finally {
+      setResolvingId(null);
     }
-
-    setResolvingId(null);
   };
 
   if (loading && !health) {

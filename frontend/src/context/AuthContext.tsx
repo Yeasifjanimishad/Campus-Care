@@ -49,7 +49,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserProfile = async (authUser: SupabaseUser): Promise<UserProfile | null> => {
+  const fetchUserProfile = async (authUser?: SupabaseUser): Promise<UserProfile | null> => {
     try {
       const data = await apiFetch('/auth/session');
       if (data.user) {
@@ -66,7 +66,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
     } catch (e: any) {
-      console.warn('[Backend Auth Profile Fetch Warning]:', e?.message || e);
+      console.warn('[Backend Auth Profile Fetch Notice]:', e?.message || e);
     }
     return null;
   };
@@ -77,6 +77,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initializeAuth = async () => {
       try {
         if (!isSupabaseConfigured) {
+          // Check for local stored token
+          const storedToken = localStorage.getItem('campuscare_session_token');
+          if (storedToken && isMounted) {
+            const profile = await fetchUserProfile();
+            if (isMounted && profile) setUserProfile(profile);
+          }
           if (isMounted) setLoading(false);
           return;
         }
@@ -90,6 +96,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setSession(data.session);
           if (data.session.user) {
             const profile = await fetchUserProfile(data.session.user);
+            if (isMounted && profile) setUserProfile(profile);
+          }
+        } else {
+          // Check fallback token in case of standalone session
+          const storedToken = localStorage.getItem('campuscare_session_token');
+          if (storedToken && isMounted) {
+            const profile = await fetchUserProfile();
             if (isMounted && profile) setUserProfile(profile);
           }
         }
@@ -116,7 +129,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUserProfile(profile);
             setLoading(false);
           }
-        } else {
+        } else if (!localStorage.getItem('campuscare_session_token')) {
           if (isMounted) {
             setUserProfile(null);
             setLoading(false);
@@ -126,7 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return () => {
         isMounted = false;
-        authListener.subscription.unsubscribe();
+        authListener?.subscription?.unsubscribe();
       };
     } else {
       return () => {
@@ -154,10 +167,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       
       if (data.session) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token
-        });
+        localStorage.setItem('campuscare_session_token', data.session.access_token);
+
+        if (isSupabaseConfigured && !data.session.access_token.startsWith('mock_token_')) {
+          try {
+            await supabase.auth.setSession({
+              access_token: data.session.access_token,
+              refresh_token: data.session.refresh_token
+            });
+          } catch (e) {
+            console.warn('[Supabase setSession Notice]:', e);
+          }
+        }
+
+        if (data.user) {
+          const trustedRole = data.user.role as UserRole;
+          setUserProfile({
+            name: data.user.name || 'University User',
+            email: data.user.email,
+            role: trustedRole,
+            roleLabel: getRoleLabel(trustedRole),
+            initials: getInitials(data.user.name, data.user.email),
+            universityId: data.user.university_id || 'N/A',
+            department: data.user.department || undefined,
+            phone: data.user.phone || undefined,
+          });
+        }
       }
       return { success: true };
     } catch (err: any) {
@@ -172,11 +207,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await apiFetch('/auth/logout', { method: 'POST' });
     } catch (err: any) {
-      console.warn('[Backend SignOut Exception]:', err?.message || err);
+      console.warn('[Backend SignOut Notice]:', err?.message || err);
     } finally {
-      // Fallback local signout
+      localStorage.removeItem('campuscare_session_token');
+      localStorage.removeItem('campuscare_mock_token');
       if (isSupabaseConfigured) {
-        await supabase.auth.signOut();
+        try {
+          await supabase.auth.signOut();
+        } catch (e) {}
       }
       setSession(null);
       setUserProfile(null);
@@ -184,8 +222,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshProfile = async (): Promise<void> => {
-    if (session?.user) {
-      const profile = await fetchUserProfile(session.user);
+    const profile = await fetchUserProfile();
+    if (profile) {
       setUserProfile(profile);
     }
   };

@@ -12,6 +12,7 @@ import {
   TrendingUp,
   Layers
 } from 'lucide-react';
+import { apiFetch } from '../lib/api';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { UserProfile } from '../types';
 
@@ -88,62 +89,41 @@ export const AdminPriorityOverview: React.FC<AdminPriorityOverviewProps> = ({
 
       const todayStr = new Date().toISOString().split('T')[0];
 
-      // Execute live count queries in parallel
+      // Execute live count queries in parallel via backend API endpoints
       const [
-        activeSosRes,
-        unackSosRes,
-        urgentIncRes,
+        sosRes,
+        incidentsRes,
         pendingAppRes,
         upcomingAppRes,
-        reviewIncRes,
       ] = await Promise.all([
-        supabase
-          .from('sos_alerts')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'active'),
-
-        supabase
-          .from('sos_alerts')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'active')
-          .is('acknowledged_at', null),
-
-        supabase
-          .from('incident_reports')
-          .select('id', { count: 'exact', head: true })
-          .in('status', ['submitted', 'under_review', 'pending']),
-
-        supabase
-          .from('appointments')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'pending'),
-
-        supabase
-          .from('appointments')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'confirmed')
-          .gte('appointment_date', todayStr),
-
-        supabase
-          .from('incident_reports')
-          .select('id', { count: 'exact', head: true })
-          .in('status', ['submitted', 'under_review', 'pending']),
+        apiFetch('/sos?status=active').catch(() => ({ data: [], total: 0 })),
+        apiFetch('/incidents?status=submitted,under_review,pending').catch(() => ({ data: [], total: 0 })),
+        apiFetch('/appointments?status=pending').catch(() => ({ data: [], total: 0 })),
+        apiFetch(`/appointments?status=confirmed&date_from=${todayStr}`).catch(() => ({ data: [], total: 0 })),
       ]);
 
-      const activeSos = Math.max(activeSosRes.count || 0, localActiveSos);
-      const unacknowledgedSos = Math.max(unackSosRes.count || 0, localUnackSos);
-      const reportsUnderReview = Math.max(reviewIncRes.count || 0, localIncidentsUnderReview);
+      const sosList: any[] = Array.isArray(sosRes?.data) ? sosRes.data : [];
+      const apiActiveSos = sosRes?.total ?? sosList.length;
+      const apiUnackSos = sosList.filter((a: any) => !a.acknowledged_at).length;
+
+      const incList: any[] = Array.isArray(incidentsRes?.data) ? incidentsRes.data : [];
+      const apiReviewInc = incidentsRes?.total ?? incList.length;
+      const apiUrgentInc = incList.filter((i: any) => i.severity === 'high' || i.severity === 'critical').length || apiReviewInc;
+
+      const activeSos = Math.max(apiActiveSos || 0, localActiveSos);
+      const unacknowledgedSos = Math.max(apiUnackSos || 0, localUnackSos);
+      const reportsUnderReview = Math.max(apiReviewInc || 0, localIncidentsUnderReview);
 
       setCounts({
         activeSos,
         unacknowledgedSos,
-        urgentIncidents: Math.max(urgentIncRes.count || 0, localIncidentsUnderReview),
-        pendingAppointments: pendingAppRes.count || 0,
-        upcomingAppointments: upcomingAppRes.count || 0,
+        urgentIncidents: Math.max(apiUrgentInc || 0, localIncidentsUnderReview),
+        pendingAppointments: pendingAppRes?.total ?? (Array.isArray(pendingAppRes?.data) ? pendingAppRes.data.length : 0),
+        upcomingAppointments: upcomingAppRes?.total ?? (Array.isArray(upcomingAppRes?.data) ? upcomingAppRes.data.length : 0),
         reportsUnderReview,
       });
     } catch (err: unknown) {
-      console.warn('[AdminPriorityOverview]: Error fetching live counts, using fallback counts', err);
+      console.warn('[AdminPriorityOverview]: Error fetching live counts via backend API, using fallback counts', err);
       setCounts({
         activeSos: localActiveSos || 1,
         unacknowledgedSos: localUnackSos || 1,

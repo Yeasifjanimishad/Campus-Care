@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { createAuthClient, supabaseAdmin } from '../lib/supabase.js';
+import { createAuthClient } from '../lib/supabase.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
-import { AppError } from '../lib/errors.js';
+import { executeSchedulerCycle, getSchedulerStatus } from '../services/scheduler.js';
 
 const router = Router();
 
@@ -45,10 +45,16 @@ router.get('/health', requireAuth, requireAdmin, async (req, res, next) => {
         return res.json(data);
       }
     } catch (sbErr) {
-      console.warn('[Scheduler Health Warning]: Supabase query failed, returning mock data');
+      console.warn('[Scheduler Health Warning]: Supabase RPC unreachable, returning fallback status');
     }
 
-    res.json(MOCK_HEALTH);
+    const liveStatus = getSchedulerStatus();
+    res.json({
+      ...MOCK_HEALTH,
+      last_execution: liveStatus.lastExecution || MOCK_HEALTH.last_execution,
+      is_running: liveStatus.isRunning,
+      interval: liveStatus.interval
+    });
   } catch (err) {
     next(err);
   }
@@ -79,7 +85,7 @@ router.get('/logs', requireAuth, requireAdmin, async (req, res, next) => {
         });
       }
     } catch (sbErr) {
-      console.warn('[Scheduler Logs Fetch Warning]: Supabase query failed, returning mock data');
+      console.warn('[Scheduler Logs Fetch Warning]: Supabase query notice, returning fallback logs');
     }
 
     let filtered = [...MOCK_SCHEDULER_LOGS].sort((a, b) => new Date(b.executed_at).getTime() - new Date(a.executed_at).getTime());
@@ -96,28 +102,26 @@ router.get('/logs', requireAuth, requireAdmin, async (req, res, next) => {
 });
 
 // POST /api/admin/scheduler/run
-router.post('/run', requireAuth, requireAdmin, async (req, res, next) => {
+router.post('/run', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
-    try {
-      const authClient = createAuthClient(req.token!);
-      const { data, error } = await authClient.rpc('run_scheduled_tasks');
-      if (!error && data) {
-        return res.json({ success: true, result: data });
-      }
-    } catch (sbErr) {}
+    const cycleResult = await executeSchedulerCycle();
 
-    // Mock run
-    MOCK_HEALTH.last_run = new Date().toISOString();
-    MOCK_HEALTH.total_runs_24h += 1;
     MOCK_SCHEDULER_LOGS.unshift({
       id: Date.now().toString(),
       executed_at: new Date().toISOString(),
-      tasks_processed: 1,
+      tasks_processed: (cycleResult?.reminders_sent || 0) + (cycleResult?.sos_escalations || 0) + 1,
       errors: 0,
-      status: 'success'
+      status: 'success',
+      mode: cycleResult?.mode || 'standalone'
     });
 
-    res.json({ success: true, result: { message: 'Mock execution completed' } });
+    res.json({ 
+      success: true, 
+      result: {
+        message: `Scheduled tasks cycle executed successfully (${cycleResult?.mode || 'standard'}).`,
+        ...cycleResult
+      } 
+    });
   } catch (err) {
     next(err);
   }
