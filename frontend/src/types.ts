@@ -63,6 +63,11 @@ export interface Doctor {
   specialization: string;
   phone?: string | null;
   designation?: string | null;
+  room_number?: string | null;
+  available_days?: string[] | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  avatar_url?: string | null;
   bio?: string | null;
   profile_image_url?: string | null;
   is_available: boolean;

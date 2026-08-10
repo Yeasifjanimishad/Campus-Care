@@ -278,17 +278,21 @@ export const SuperAdminUserManager: React.FC<SuperAdminUserManagerProps> = ({ us
 
     if (newRole === 'doctor') {
       const doctorObj = {
-        id: targetUser.id,
-        doctor_id: targetUser.universityId || targetUser.university_id || 'DOC-' + targetUser.id.slice(0, 4),
+        doctor_id: targetUser.universityId || targetUser.university_id || 'DOC-' + targetUser.id.slice(0, 6),
         full_name: targetUser.name.startsWith('Dr.') ? targetUser.name : `Dr. ${targetUser.name}`,
         email: targetUser.email,
         department: targetUser.department || 'Medical Center',
         specialization: 'General Medicine',
         designation: 'Medical Officer / Doctor',
         phone: targetUser.phone || '+880 1700-000000',
-        bio: 'Campus medical officer providing clinical healthcare services.',
-        profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+        room_number: 'Room 101, Medical Center',
+        available_days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'],
+        start_time: '09:00:00',
+        end_time: '17:00:00',
         is_available: true,
+        avatar_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+        profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+        user_id: targetUser.id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -297,15 +301,24 @@ export const SuperAdminUserManager: React.FC<SuperAdminUserManagerProps> = ({ us
         const rawLocal = localStorage.getItem('campuscare_local_doctors');
         const existing = rawLocal ? JSON.parse(rawLocal) : [];
         const filtered = existing.filter((d: any) => d.id !== targetUser.id && d.email !== targetUser.email);
-        filtered.unshift(doctorObj);
+        filtered.unshift({ ...doctorObj, id: targetUser.id });
         localStorage.setItem('campuscare_local_doctors', JSON.stringify(filtered));
       } catch (e) {}
+
+      // Save to database via API
+      try {
+        await apiFetch('/doctors', {
+          method: 'POST',
+          body: JSON.stringify(doctorObj)
+        });
+      } catch (apiDocErr) {
+        console.warn('[SuperAdmin Doctor DB Save API Notice]:', apiDocErr);
+      }
 
       if (isSupabaseConfigured) {
         try {
           await supabase.from('doctors').upsert({
-            id: targetUser.id,
-            user_id: targetUser.id,
+            user_id: targetUser.id.length === 36 ? targetUser.id : undefined,
             doctor_id: doctorObj.doctor_id,
             full_name: doctorObj.full_name,
             email: doctorObj.email,
@@ -313,8 +326,11 @@ export const SuperAdminUserManager: React.FC<SuperAdminUserManagerProps> = ({ us
             specialization: doctorObj.specialization,
             designation: doctorObj.designation,
             phone: doctorObj.phone,
-            bio: doctorObj.bio,
-            profile_image_url: doctorObj.profile_image_url,
+            room_number: doctorObj.room_number,
+            available_days: doctorObj.available_days,
+            start_time: doctorObj.start_time,
+            end_time: doctorObj.end_time,
+            avatar_url: doctorObj.avatar_url,
             is_available: true,
           }, { onConflict: 'email' });
         } catch (e) {}

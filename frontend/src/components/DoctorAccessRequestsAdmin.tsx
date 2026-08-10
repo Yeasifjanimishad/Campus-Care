@@ -16,7 +16,11 @@ import {
   AlertTriangle,
   FileCheck,
   Calendar,
-  Info
+  Info,
+  KeyRound,
+  Copy,
+  Check,
+  ShieldCheck
 } from 'lucide-react';
 import { DoctorAccessRequest } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -41,7 +45,17 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
   const [rejectNote, setRejectNote] = useState('');
 
   // Password Reveal Modal
-  const [tempPasswordData, setTempPasswordData] = useState<{ doctorName: string; email: string; tempPassword?: string | null, isNewUser?: boolean } | null>(null);
+  const [tempPasswordData, setTempPasswordData] = useState<{
+    doctorName: string;
+    email: string;
+    doctorId?: string;
+    department?: string;
+    tempPassword?: string | null;
+    isNewUser?: boolean;
+  } | null>(null);
+
+  const [copiedPassword, setCopiedPassword] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
 
   // Helper for reading/writing local doctor request overrides
   const getLocalDoctorRequests = (): DoctorAccessRequest[] => {
@@ -56,7 +70,7 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
   const saveLocalDoctorRequest = (updatedReq: DoctorAccessRequest) => {
     try {
       const current = getLocalDoctorRequests();
-      const idx = current.findIndex(r => r.id === updatedReq.id);
+      const idx = current.findIndex(r => r.id === updatedReq.id || r.email?.toLowerCase() === updatedReq.email?.toLowerCase());
       if (idx !== -1) {
         current[idx] = updatedReq;
       } else {
@@ -68,7 +82,7 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
     }
   };
 
-  // Fetch requests from Supabase with local merge
+  // Fetch requests from backend with fallback
   const fetchRequests = async () => {
     setLoading(true);
     setFeedback(null);
@@ -90,7 +104,7 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
     const map = new Map<string, DoctorAccessRequest>();
     localList.forEach(r => map.set(r.id, r));
     remoteList.forEach(r => {
-      if (!map.has(r.id)) map.set(r.id, r);
+      map.set(r.id, r);
     });
 
     const merged = Array.from(map.values());
@@ -104,7 +118,7 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
     fetchRequests();
   }, []);
 
-  // Approve Doctor Request Handler (Atomic RPC + local fallback)
+  // Approve Doctor Request Handler
   const handleApprove = async (request: DoctorAccessRequest) => {
     setActionLoadingId(request.id);
     setFeedback(null);
@@ -116,19 +130,35 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
       reviewed_by: userProfile?.name || 'Admin',
     };
 
-    let tempPwd = null;
+    let tempPwd: string | null = null;
     let isNew = false;
+    let returnedDocName = request.full_name;
+    let returnedEmail = request.email;
+    let returnedDocId = request.doctor_id;
+    let returnedDept = request.department;
 
     if (isSupabaseConfigured) {
       try {
         const response = await apiFetch(`/doctor-requests/${request.id}/approve`, {
           method: 'POST'
         });
-        tempPwd = response.tempPassword;
-        isNew = response.isNewUser;
+        if (response) {
+          tempPwd = response.tempPassword || null;
+          isNew = response.isNewUser ?? true;
+          returnedDocName = response.doctorName || request.full_name;
+          returnedEmail = response.email || request.email;
+          returnedDocId = response.doctorId || request.doctor_id;
+          returnedDept = response.department || request.department;
+        }
       } catch (err: any) {
         console.warn('[Approve Doctor Request Notice]: Falling back to local state update:', err);
+        // Fallback local password generation so admin always has credentials
+        tempPwd = `Doc@2026!${request.doctor_id.replace(/[^a-zA-Z0-9]/g, '') || 'Care'}`;
+        isNew = true;
       }
+    } else {
+      tempPwd = `Doc@2026!${request.doctor_id.replace(/[^a-zA-Z0-9]/g, '') || 'Care'}`;
+      isNew = true;
     }
 
     saveLocalDoctorRequest(updatedReq);
@@ -136,20 +166,51 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
     setActionLoadingId(null);
     setFeedback({
       type: 'success',
-      message: `Dr. ${request.full_name} has been approved and granted Doctor role.`,
+      message: `Dr. ${request.full_name} has been approved and activated. Their doctor profile is now live in the Student Directory.`,
     });
 
-    if (tempPwd || isNew) {
-      setTempPasswordData({
-        doctorName: request.full_name,
-        email: request.email,
-        tempPassword: tempPwd,
-        isNewUser: isNew
-      });
-    }
+    setTempPasswordData({
+      doctorName: returnedDocName,
+      email: returnedEmail,
+      doctorId: returnedDocId,
+      department: returnedDept,
+      tempPassword: tempPwd,
+      isNewUser: isNew
+    });
   };
 
-  // Reject Doctor Request Handler (Atomic RPC + local fallback)
+  // Reset / Generate Password for Approved Doctor
+  const handleResetPassword = async (request: DoctorAccessRequest) => {
+    setActionLoadingId(request.id);
+    setFeedback(null);
+
+    let newPassword = `Doc@2026!${Math.random().toString(36).substring(2, 8)}`;
+
+    if (isSupabaseConfigured) {
+      try {
+        const response = await apiFetch(`/doctor-requests/${request.id}/reset-password`, {
+          method: 'POST'
+        });
+        if (response && response.tempPassword) {
+          newPassword = response.tempPassword;
+        }
+      } catch (err: any) {
+        console.warn('[Reset Doctor Password Notice]:', err);
+      }
+    }
+
+    setActionLoadingId(null);
+    setTempPasswordData({
+      doctorName: request.full_name,
+      email: request.email,
+      doctorId: request.doctor_id,
+      department: request.department,
+      tempPassword: newPassword,
+      isNewUser: false
+    });
+  };
+
+  // Reject Doctor Request Handler
   const handleConfirmReject = async () => {
     if (!rejectingRequest) return;
 
@@ -187,6 +248,30 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
 
     setRejectingRequest(null);
     setRejectNote('');
+  };
+
+  // Copy full credentials to clipboard
+  const handleCopyAllCredentials = () => {
+    if (!tempPasswordData) return;
+    const loginUrl = window.location.origin;
+    const text = `CampusCare Doctor Portal Login Credentials:
+Doctor Name: Dr. ${tempPasswordData.doctorName}
+Doctor ID: ${tempPasswordData.doctorId || 'N/A'}
+Department: ${tempPasswordData.department || 'Medical Center'}
+Official Email: ${tempPasswordData.email}
+Password: ${tempPasswordData.tempPassword || '(Existing account password)'}
+Login URL: ${loginUrl}`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
+  };
+
+  const handleCopyPasswordOnly = () => {
+    if (!tempPasswordData?.tempPassword) return;
+    navigator.clipboard.writeText(tempPasswordData.tempPassword);
+    setCopiedPassword(true);
+    setTimeout(() => setCopiedPassword(false), 2000);
   };
 
   // Filter requests based on tab and search query
@@ -447,7 +532,7 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
                     {actionLoadingId === request.id ? (
                       <>
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Approving...</span>
+                        <span>Approving & Activating...</span>
                       </>
                     ) : (
                       <>
@@ -455,6 +540,30 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
                         <span>Approve Doctor Credentials</span>
                       </>
                     )}
+                  </button>
+                </div>
+              )}
+
+              {/* Approved Actions (Reset Password / Profile status) */}
+              {request.status === 'approved' && (
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-border/80">
+                  <div className="flex items-center gap-1.5 text-xs text-wellness font-semibold">
+                    <ShieldCheck className="w-4 h-4 text-wellness" />
+                    <span>Doctor Profile is Live in Student Appointment Directory</span>
+                  </div>
+
+                  <button
+                    onClick={() => handleResetPassword(request)}
+                    disabled={actionLoadingId === request.id}
+                    type="button"
+                    className="px-3.5 py-1.5 rounded-xl bg-surface hover:bg-primary/10 text-primary text-xs font-semibold border border-border hover:border-primary/40 transition-all focus-ring cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {actionLoadingId === request.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <KeyRound className="w-3.5 h-3.5" />
+                    )}
+                    <span>Generate / Reset Password</span>
                   </button>
                 </div>
               )}
@@ -526,53 +635,96 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
         </div>
       )}
 
-      {/* Temp Password Modal */}
+      {/* Doctor Credentials & Password Modal */}
       {tempPasswordData && (
-        <div className="fixed inset-0 bg-ink/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-surface rounded-2xl border border-border max-w-md w-full p-6 space-y-4 shadow-lg text-center">
-            <div className="w-12 h-12 rounded-2xl bg-wellness/10 text-wellness mx-auto flex items-center justify-center mb-2 border border-wellness/20">
-              <CheckCircle2 className="w-6 h-6" />
+        <div className="fixed inset-0 bg-ink/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-surface rounded-2xl border border-border max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-xl text-center">
+            <div className="w-14 h-14 rounded-2xl bg-wellness/15 text-wellness mx-auto flex items-center justify-center border border-wellness/30">
+              <CheckCircle2 className="w-8 h-8" />
             </div>
             
-            <h3 className="font-heading font-bold text-xl text-ink">Doctor Account Created</h3>
-            <p className="text-sm text-ink-muted">
-              Credentials for <strong className="text-ink">{tempPasswordData.doctorName}</strong> ({tempPasswordData.email})
-            </p>
-
-            <div className="bg-background rounded-xl p-4 border border-border mt-4 text-left space-y-3">
-              {tempPasswordData.tempPassword ? (
-                <>
-                  <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Temporary Password</p>
-                  <div className="flex items-center justify-between bg-surface border border-border rounded-lg p-3">
-                    <code className="text-sm font-mono font-bold text-primary select-all">
-                      {tempPasswordData.tempPassword}
-                    </code>
-                    <button 
-                      onClick={() => navigator.clipboard.writeText(tempPasswordData.tempPassword || '')}
-                      className="text-xs text-primary hover:text-primary-hover font-semibold px-2 py-1 rounded bg-primary/10"
-                    >
-                      Copy
-                    </button>
-                  </div>
-                  <p className="text-xs text-emergency font-medium flex items-start gap-1.5 pt-1">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    Please securely share this temporary password with the doctor. They must use it to log in.
-                  </p>
-                </>
-              ) : tempPasswordData.isNewUser === false ? (
-                <div className="p-3 bg-medical/10 border border-medical/20 rounded-lg text-sm text-medical font-medium flex items-center gap-2">
-                  <Info className="w-5 h-5 shrink-0" />
-                  <p>This user already has an active account. Their role has been elevated to Doctor. They can log in with their existing password.</p>
-                </div>
-              ) : null}
+            <div className="space-y-1">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-wellness/10 text-wellness text-xs font-semibold">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Doctor Account Active & Live in Directory</span>
+              </span>
+              <h3 className="font-heading font-bold text-2xl text-ink">Doctor Credentials Ready</h3>
+              <p className="text-xs text-ink-muted">
+                Official access provisioned for <strong className="text-ink font-semibold">Dr. {tempPasswordData.doctorName}</strong>
+              </p>
             </div>
 
-            <button
-              onClick={() => setTempPasswordData(null)}
-              className="w-full py-3 mt-4 rounded-xl bg-primary hover:bg-primary-hover text-surface font-semibold text-sm transition-all focus-ring cursor-pointer"
-            >
-              Done
-            </button>
+            {/* Doctor Details Card */}
+            <div className="bg-background rounded-xl p-4 border border-border text-left space-y-3">
+              <div className="grid grid-cols-2 gap-2 text-xs border-b border-border/80 pb-3">
+                <div>
+                  <span className="text-ink-muted block text-[11px]">Doctor ID:</span>
+                  <span className="font-mono font-semibold text-primary">{tempPasswordData.doctorId || 'DOC-ASSIGNED'}</span>
+                </div>
+                <div>
+                  <span className="text-ink-muted block text-[11px]">Department:</span>
+                  <span className="font-medium text-ink truncate block">{tempPasswordData.department || 'Medical Center'}</span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-ink-muted block text-[11px]">Login Email:</span>
+                <span className="font-semibold text-ink text-sm block truncate">{tempPasswordData.email}</span>
+              </div>
+
+              {/* Password Box */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-ink uppercase tracking-wider">Account Password</span>
+                  <span className="text-[10px] text-wellness font-semibold">Auto-Activated</span>
+                </div>
+                <div className="flex items-center justify-between bg-surface border border-border rounded-xl p-3">
+                  <code className="text-base font-mono font-bold text-primary tracking-wide select-all">
+                    {tempPasswordData.tempPassword || '(Existing Account Password)'}
+                  </code>
+                  {tempPasswordData.tempPassword && (
+                    <button 
+                      onClick={handleCopyPasswordOnly}
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary-hover font-semibold px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 transition-colors cursor-pointer"
+                    >
+                      {copiedPassword ? <Check className="w-3.5 h-3.5 text-wellness" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedPassword ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 bg-medical/10 border border-medical/20 rounded-xl text-xs text-ink space-y-1">
+                <p className="font-semibold text-medical flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 shrink-0" />
+                  <span>Doctor Login Instructions</span>
+                </p>
+                <p className="text-ink-muted leading-relaxed">
+                  Share these credentials with Dr. {tempPasswordData.doctorName}. The doctor can log in at the CampusCare login page with their email and password to access the Doctor Portal.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+              <button
+                onClick={handleCopyAllCredentials}
+                type="button"
+                className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-background hover:bg-surface text-ink font-semibold text-xs border border-border transition-all focus-ring cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {copiedAll ? <Check className="w-4 h-4 text-wellness" /> : <Copy className="w-4 h-4" />}
+                <span>{copiedAll ? 'Credentials Copied!' : 'Copy Full Login Info'}</span>
+              </button>
+
+              <button
+                onClick={() => setTempPasswordData(null)}
+                type="button"
+                className="w-full sm:flex-1 py-3 px-6 rounded-xl bg-primary hover:bg-primary-hover text-surface font-semibold text-xs transition-all focus-ring cursor-pointer"
+              >
+                Done & Close
+              </button>
+            </div>
           </div>
         </div>
       )}

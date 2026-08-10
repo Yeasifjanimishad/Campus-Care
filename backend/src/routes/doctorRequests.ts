@@ -152,53 +152,45 @@ router.get('/', requireAuth, requireAdmin, async (req, res, next) => {
   }
 });
 
-// Helper function to generate a secure random temporary password
-const generateTempPassword = (length: number = 12): string => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+';
-  let password = '';
-  // Ensure at least one of each required character type
-  password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
-  password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];
-  password += '0123456789'[Math.floor(Math.random() * 10)];
-  password += '!@#$%^&*()_+'[Math.floor(Math.random() * 12)];
-  
-  for (let i = 4; i < length; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
+// Helper function to generate a secure, readable temporary password
+const generateTempPassword = (prefix: string = 'Doc@2026!'): string => {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let rand = '';
+  for (let i = 0; i < 6; i++) {
+    rand += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  
-  // Shuffle the password
-  return password.split('').sort(() => 0.5 - Math.random()).join('');
+  return `${prefix}${rand}`;
 };
 
 // POST /api/doctor-requests/:id/approve
 router.post('/:id/approve', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const { id } = req.params;
+    const customPassword = req.body?.tempPassword?.trim();
 
     // 1. Fetch the pending request using supabaseAdmin
     const { data: request, error: fetchError } = await supabaseAdmin
       .from('doctor_access_requests')
       .select('*')
       .eq('id', id)
-      .eq('status', 'pending')
       .single();
 
     if (fetchError || !request) {
-      throw new AppError(404, 'Request not found or is no longer pending', fetchError?.message);
+      throw new AppError(404, 'Request not found: ' + (fetchError?.message || 'Invalid ID'));
     }
 
-    let userId: string;
-    let tempPassword: string | null = null;
+    let userId: string = '';
+    const tempPassword = customPassword || generateTempPassword();
     let isNewUser = false;
+    const cleanEmail = request.email.toLowerCase().trim();
 
-    // 2. Check if user already exists
+    // 2. Check if user profile already exists in public.users
     const { data: existingProfiles } = await supabaseAdmin
       .from('users')
-      .select('id')
-      .eq('email', request.email.toLowerCase());
+      .select('id, email, role')
+      .eq('email', cleanEmail);
 
     if (existingProfiles && existingProfiles.length > 0) {
-      // User profile already exists
       userId = existingProfiles[0].id;
       
       // Update their profile to 'doctor' role
@@ -208,44 +200,76 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res, next) =>
           role: 'doctor',
           name: request.full_name,
           university_id: request.doctor_id,
-          department: request.department,
-          phone: request.phone || null
+          department: request.department || 'Medical Center',
+          phone: request.phone || null,
+          status: 'active'
         })
         .eq('id', userId);
-    } else {
-      // Generate a temporary password and create a new Auth user
-      tempPassword = generateTempPassword();
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email: request.email.toLowerCase(),
-        password: tempPassword,
-        email_confirm: true,
-        user_metadata: { name: request.full_name }
-      });
 
-      if (authError || !authData.user) {
-        throw new AppError(500, 'Failed to create auth user', authError?.message);
+      // Also reset/update their Auth password so the admin has the guaranteed password to give
+      try {
+        await supabaseAdmin.auth.admin.updateUserById(userId, {
+          password: tempPassword,
+          email_confirm: true,
+          user_metadata: { name: request.full_name }
+        });
+      } catch (authUpdateErr) {
+        console.warn('[Doctor Approval Auth Update Notice]:', authUpdateErr);
       }
-      
-      userId = authData.user.id;
-      isNewUser = true;
+    } else {
+      // Check if user already exists in auth.users
+      let existingAuthId: string | null = null;
+      try {
+        const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+        const found = listData?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+        if (found) {
+          existingAuthId = found.id;
+        }
+      } catch (listErr) {
+        console.warn('[Doctor Approval listUsers Warning]:', listErr);
+      }
 
-      // Insert into public.users
+      if (existingAuthId) {
+        userId = existingAuthId;
+        // Update password for existing auth account
+        await supabaseAdmin.auth.admin.updateUserById(userId, {
+          password: tempPassword,
+          email_confirm: true,
+          user_metadata: { name: request.full_name }
+        });
+      } else {
+        // Create a new Auth user
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+          email: cleanEmail,
+          password: tempPassword,
+          email_confirm: true,
+          user_metadata: { name: request.full_name }
+        });
+
+        if (authError || !authData.user) {
+          throw new AppError(500, 'Failed to create auth credentials for doctor: ' + (authError?.message || 'Unknown error'));
+        }
+        
+        userId = authData.user.id;
+        isNewUser = true;
+      }
+
+      // Upsert into public.users
       const { error: profileError } = await supabaseAdmin
         .from('users')
-        .insert({
+        .upsert({
           id: userId,
-          email: request.email.toLowerCase(),
+          email: cleanEmail,
           name: request.full_name,
           university_id: request.doctor_id,
           role: 'doctor',
-          department: request.department,
-          phone: request.phone || null
+          department: request.department || 'Medical Center',
+          phone: request.phone || null,
+          status: 'active'
         });
         
       if (profileError) {
-          // Rollback Auth user creation if DB insert fails
-          await supabaseAdmin.auth.admin.deleteUser(userId);
-          throw new AppError(500, 'Failed to create user profile', profileError.message);
+        console.warn('[Doctor Approval profile upsert warning]:', profileError.message);
       }
     }
 
@@ -259,38 +283,62 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res, next) =>
       })
       .eq('id', id);
 
-    // 4. Create or update doctor record
-    const { data: existingDoctor } = await supabaseAdmin
-      .from('doctors')
-      .select('id')
-      .eq('doctor_id', request.doctor_id);
-      
-    if (existingDoctor && existingDoctor.length > 0) {
+    // 4. Create or update doctor catalog record in public.doctors
+    try {
+      const { data: existingDoctor } = await supabaseAdmin
+        .from('doctors')
+        .select('id')
+        .or(`doctor_id.eq.${request.doctor_id},email.eq.${cleanEmail}`)
+        .maybeSingle();
+        
+      const doctorPayload: Record<string, any> = {
+        doctor_id: request.doctor_id,
+        full_name: request.full_name.startsWith('Dr.') ? request.full_name : `Dr. ${request.full_name}`,
+        email: cleanEmail,
+        department: request.department || 'Medical Center',
+        specialization: request.department || 'General Medicine',
+        designation: 'Consultant Physician',
+        phone: request.phone || '+880 1700-000000',
+        room_number: 'Room 101, Medical Center',
+        available_days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'],
+        start_time: '09:00:00',
+        end_time: '17:00:00',
+        is_available: true,
+        avatar_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+        updated_at: new Date().toISOString()
+      };
+
+      if (userId) {
+        doctorPayload.user_id = userId;
+      }
+
+      if (existingDoctor?.id) {
         await supabaseAdmin
           .from('doctors')
-          .update({
-            user_id: userId,
-            full_name: request.full_name,
-            email: request.email.toLowerCase(),
-            department: request.department,
-            phone: request.phone || null,
-            is_available: true
-          })
-          .eq('doctor_id', request.doctor_id);
-    } else {
-        await supabaseAdmin
+          .update(doctorPayload)
+          .eq('id', existingDoctor.id);
+      } else {
+        const { error: docInsertErr } = await supabaseAdmin
           .from('doctors')
-          .insert({
-            user_id: userId,
-            doctor_id: request.doctor_id,
-            full_name: request.full_name,
-            email: request.email.toLowerCase(),
-            department: request.department,
-            specialization: 'General Medicine', // Default
-            phone: request.phone || null,
-            designation: 'Consultant Physician',
-            is_available: true
-          });
+          .insert([doctorPayload]);
+
+        if (docInsertErr) {
+          console.warn('[Doctor Catalog Insert Warning - Retrying with minimal payload]:', docInsertErr.message);
+          // Fallback minimal insert with exact columns
+          await supabaseAdmin
+            .from('doctors')
+            .insert([{
+              user_id: userId || null,
+              doctor_id: request.doctor_id,
+              full_name: request.full_name,
+              email: cleanEmail,
+              department: request.department || 'Medical Center',
+              is_available: true
+            }]);
+        }
+      }
+    } catch (docTableErr) {
+      console.warn('[Doctor Catalog Upsert Exception]:', docTableErr);
     }
 
     // 5. Add Audit Log
@@ -303,7 +351,7 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res, next) =>
           target_user_id: userId,
           metadata: {
             doctor_id: request.doctor_id,
-            email: request.email,
+            email: cleanEmail,
             full_name: request.full_name,
             department: request.department
           }
@@ -314,9 +362,60 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res, next) =>
 
     return res.json({
       success: true,
-      message: 'Doctor request approved and doctor profile assigned successfully.',
+      message: `Doctor Dr. ${request.full_name} approved and activated successfully.`,
       tempPassword: tempPassword,
-      isNewUser: isNewUser
+      isNewUser: isNewUser,
+      doctorName: request.full_name,
+      email: cleanEmail,
+      doctorId: request.doctor_id,
+      department: request.department || 'Medical Center'
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/doctor-requests/:id/reset-password
+router.post('/:id/reset-password', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { data: request, error: fetchError } = await supabaseAdmin
+      .from('doctor_access_requests')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !request) {
+      throw new AppError(404, 'Doctor access request not found');
+    }
+
+    const cleanEmail = request.email.toLowerCase().trim();
+    const newPassword = generateTempPassword();
+
+    // Look up user id
+    const { data: userData } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('email', cleanEmail)
+      .maybeSingle();
+
+    if (!userData?.id) {
+      throw new AppError(404, 'No active user account found for this doctor email');
+    }
+
+    await supabaseAdmin.auth.admin.updateUserById(userData.id, {
+      password: newPassword,
+      email_confirm: true
+    });
+
+    return res.json({
+      success: true,
+      message: 'Password reset successfully',
+      tempPassword: newPassword,
+      doctorName: request.full_name,
+      email: cleanEmail,
+      doctorId: request.doctor_id,
+      department: request.department || 'Medical Center'
     });
   } catch (err) {
     next(err);

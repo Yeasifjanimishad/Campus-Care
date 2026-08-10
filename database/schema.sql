@@ -623,7 +623,7 @@ CREATE POLICY "Admins can delete doctor access requests"
 DROP POLICY IF EXISTS "Anyone can view active doctors" ON public.doctors;
 CREATE POLICY "Anyone can view active doctors"
   ON public.doctors FOR SELECT TO authenticated, anon
-  USING (is_available = true OR public.is_admin() OR auth.uid() = user_id);
+  USING (true);
 
 DROP POLICY IF EXISTS "Doctors can update their own profile" ON public.doctors;
 CREATE POLICY "Doctors can update their own profile"
@@ -923,7 +923,7 @@ BEGIN
   END IF;
 
   -- 5. Upsert doctor catalog record
-  SELECT id INTO v_doc_id FROM public.doctors WHERE doctor_id = v_req.doctor_id;
+  SELECT id INTO v_doc_id FROM public.doctors WHERE doctor_id = v_req.doctor_id OR LOWER(email) = LOWER(v_req.email);
 
   IF v_doc_id IS NOT NULL THEN
     UPDATE public.doctors
@@ -931,7 +931,8 @@ BEGIN
       user_id = COALESCE(v_user_id, user_id),
       full_name = v_req.full_name,
       email = v_req.email,
-      department = v_req.department,
+      department = COALESCE(NULLIF(TRIM(v_req.department), ''), 'Medical Center'),
+      specialization = COALESCE(NULLIF(TRIM(v_req.department), ''), 'General Medicine'),
       phone = COALESCE(v_req.phone, phone),
       is_available = TRUE,
       updated_at = NOW()
@@ -944,16 +945,26 @@ BEGIN
       email,
       department,
       specialization,
+      designation,
       phone,
+      room_number,
+      available_days,
+      start_time,
+      end_time,
       is_available
     ) VALUES (
       v_user_id,
       v_req.doctor_id,
       v_req.full_name,
       v_req.email,
-      v_req.department,
-      COALESCE(v_req.department, 'General Medicine'),
-      v_req.phone,
+      COALESCE(NULLIF(TRIM(v_req.department), ''), 'Medical Center'),
+      COALESCE(NULLIF(TRIM(v_req.department), ''), 'General Medicine'),
+      'Consultant Physician',
+      COALESCE(v_req.phone, '+880 1700-000000'),
+      'Room 101, Medical Center',
+      ARRAY['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday']::TEXT[],
+      '09:00:00'::TIME,
+      '17:00:00'::TIME,
       TRUE
     )
     RETURNING id INTO v_doc_id;

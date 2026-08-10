@@ -302,17 +302,21 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ user }) => {
 
     if (selectedRole === 'doctor') {
       const doctorObj = {
-        id: roleModalUser.id,
-        doctor_id: roleModalUser.universityId || roleModalUser.university_id || 'DOC-' + roleModalUser.id.slice(0, 4),
+        doctor_id: roleModalUser.universityId || roleModalUser.university_id || 'DOC-' + roleModalUser.id.slice(0, 6),
         full_name: roleModalUser.name.startsWith('Dr.') ? roleModalUser.name : `Dr. ${roleModalUser.name}`,
         email: roleModalUser.email,
         department: roleModalUser.department || 'Medical Center',
         specialization: 'General Medicine',
         designation: 'Medical Officer / Doctor',
         phone: roleModalUser.phone || '+880 1700-000000',
-        bio: 'Campus medical officer providing clinical healthcare services.',
-        profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+        room_number: 'Room 101, Medical Center',
+        available_days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'],
+        start_time: '09:00:00',
+        end_time: '17:00:00',
         is_available: true,
+        avatar_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+        profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+        user_id: roleModalUser.id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -321,15 +325,24 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ user }) => {
         const rawLocal = localStorage.getItem('campuscare_local_doctors');
         const existing = rawLocal ? JSON.parse(rawLocal) : [];
         const filtered = existing.filter((d: any) => d.id !== roleModalUser.id && d.email !== roleModalUser.email);
-        filtered.unshift(doctorObj);
+        filtered.unshift({ ...doctorObj, id: roleModalUser.id });
         localStorage.setItem('campuscare_local_doctors', JSON.stringify(filtered));
       } catch (e) {}
+
+      // Save to database via API
+      try {
+        await apiFetch('/doctors', {
+          method: 'POST',
+          body: JSON.stringify(doctorObj)
+        });
+      } catch (apiDocErr) {
+        console.warn('[Admin Doctor DB Save API Notice]:', apiDocErr);
+      }
 
       if (isSupabaseConfigured) {
         try {
           await supabase.from('doctors').upsert({
-            id: roleModalUser.id,
-            user_id: roleModalUser.id,
+            user_id: roleModalUser.id.length === 36 ? roleModalUser.id : undefined,
             doctor_id: doctorObj.doctor_id,
             full_name: doctorObj.full_name,
             email: doctorObj.email,
@@ -337,8 +350,11 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ user }) => {
             specialization: doctorObj.specialization,
             designation: doctorObj.designation,
             phone: doctorObj.phone,
-            bio: doctorObj.bio,
-            profile_image_url: doctorObj.profile_image_url,
+            room_number: doctorObj.room_number,
+            available_days: doctorObj.available_days,
+            start_time: doctorObj.start_time,
+            end_time: doctorObj.end_time,
+            avatar_url: doctorObj.avatar_url,
             is_available: true,
           }, { onConflict: 'email' });
         } catch (e) {}

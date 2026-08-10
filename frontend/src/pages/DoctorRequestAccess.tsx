@@ -14,7 +14,10 @@ import {
   Info,
   Clock,
   ShieldCheck,
-  ChevronLeft
+  ChevronLeft,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { PageRoute, DoctorAccessRequest } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -32,6 +35,8 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
   const [email, setEmail] = useState('');
   const [department, setDepartment] = useState('');
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
@@ -54,6 +59,7 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
     const cleanEmail = email.trim();
     const cleanDept = department.trim();
     const cleanPhone = phone.trim();
+    const cleanPassword = password.trim();
     const cleanMsg = message.trim();
 
     // Validation
@@ -69,6 +75,10 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
     }
 
     if (!cleanDept) newErrors.department = 'Department / Specialization is required.';
+
+    if (cleanPassword && cleanPassword.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters if specified.';
+    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -100,7 +110,7 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
           if (statusInfo.exists_approved) {
             setIsLoading(false);
             setFormErrorBanner(
-              'Your Doctor access request has already been approved! You can log in or sign up with your credentials.'
+              'Your Doctor access request has already been approved! You can log in with your credentials.'
             );
             return;
           }
@@ -120,6 +130,7 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
             doctor_id: cleanDocId,
             department: cleanDept,
             phone: cleanPhone || undefined,
+            password: cleanPassword || undefined,
             message: cleanMsg || undefined
           })
         });
@@ -152,7 +163,6 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
       try {
         const stored = localStorage.getItem('campuscare_doctor_requests');
         const list = stored ? JSON.parse(stored) : [];
-        // Prevent duplicate local entries
         const existingIdx = list.findIndex((r: any) => r.email?.toLowerCase() === cleanEmail.toLowerCase() || r.doctor_id === cleanDocId);
         if (existingIdx >= 0) {
           list[existingIdx] = localReq;
@@ -424,6 +434,38 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Optional Account Password */}
+              <div className="space-y-1">
+                <label htmlFor="doc-password" className="text-xs font-semibold text-ink uppercase tracking-wider block">
+                  Account Password <span className="normal-case text-ink-muted font-normal">(Optional - auto-generated if left blank)</span>
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-ink-muted absolute left-3.5 top-3.5" />
+                  <input
+                    id="doc-password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (errors.password) setErrors((prev) => ({ ...prev, password: '' }));
+                    }}
+                    placeholder="Create a password (min. 6 characters) or leave blank"
+                    className="w-full pl-10 pr-10 py-3 bg-background rounded-xl border border-border text-sm text-ink focus:border-primary focus:bg-surface focus-ring transition-all placeholder:text-ink-muted/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-3.5 text-ink-muted hover:text-ink transition-colors cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {errors.password && <p className="text-xs font-medium text-emergency">{errors.password}</p>}
+                <p className="text-[11px] text-ink-muted">
+                  If left blank, a secure temporary password will be provisioned by the admin upon verification.
+                </p>
               </div>
 
               {/* Message / Verification Notes */}

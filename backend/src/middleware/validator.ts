@@ -126,6 +126,7 @@ export const createDoctorRequestSchema = z.object({
   department: z.string().optional(),
   phone: z.string().optional(),
   message: z.string().optional(),
+  password: z.string().min(6, 'Password must be at least 6 characters long').optional(),
 });
 
 export const reviewDoctorRequestSchema = z.object({

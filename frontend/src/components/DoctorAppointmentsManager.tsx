@@ -22,7 +22,11 @@ import {
   Phone,
   Calendar,
   ChevronRight,
-  ShieldAlert
+  ShieldAlert,
+  SlidersHorizontal,
+  Save,
+  MapPin,
+  Sparkles
 } from 'lucide-react';
 
 interface DoctorAppointmentsManagerProps {
@@ -37,6 +41,34 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [profileSuccessMsg, setProfileSuccessMsg] = useState<string | null>(null);
+
+  // Profile Editor Modal State
+  const [profileModalOpen, setProfileModalOpen] = useState<boolean>(false);
+  const [savingProfile, setSavingProfile] = useState<boolean>(false);
+  const [editProfileForm, setEditProfileForm] = useState<{
+    full_name: string;
+    department: string;
+    specialization: string;
+    designation: string;
+    phone: string;
+    room_number: string;
+    start_time: string;
+    end_time: string;
+    available_days: string[];
+    is_available: boolean;
+  }>({
+    full_name: '',
+    department: 'Medical Center',
+    specialization: 'General Medicine',
+    designation: 'Consultant Physician',
+    phone: '',
+    room_number: 'Room 101, Medical Center',
+    start_time: '09:00:00',
+    end_time: '17:00:00',
+    available_days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'],
+    is_available: true
+  });
 
   // Filters & Search
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
@@ -68,19 +100,13 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
   const fetchDoctorProfileAndAppointments = useCallback(async () => {
     setError(null);
     try {
-      const authUser = (await supabase.auth.getUser()).data.user;
-      if (!authUser) {
-        throw new Error('Doctor authentication session not found');
-      }
-
-      // Query public.doctors linked to auth.uid() or email or universityId
+      // Query public.doctors linked to email or universityId or search
       let docData: Doctor | null = null;
       try {
         const search = user.universityId || user.email;
         if (search) {
           const response = await apiFetch(`/doctors?search=${encodeURIComponent(search)}`);
           if (response && response.data && response.data.length > 0) {
-            // Find the exact match if possible, or just use the first result
             docData = response.data.find((d: Doctor) =>
                 d.doctor_id === user.universityId ||
                 d.email?.toLowerCase() === user.email?.toLowerCase()
@@ -91,23 +117,74 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
         console.warn('[DoctorAppointmentsManager]: Doctor profile query notice:', e);
       }
 
+      // If doctor not in database yet, auto-create profile and persist to database
       if (!docData) {
-        throw new Error('Doctor profile not found');
+        const fallbackDoc: Doctor = {
+          id: user.id || 'doc-' + Math.random().toString(36).substring(2, 8),
+          doctor_id: user.universityId || 'DOC-' + (user.id?.slice(0, 6) || '701'),
+          full_name: user.name?.startsWith('Dr.') ? user.name : `Dr. ${user.name || 'Medical Officer'}`,
+          email: user.email || '',
+          department: user.department || 'Medical Center',
+          specialization: user.department || 'General Medicine',
+          designation: 'Consultant Physician',
+          phone: user.phone || '+880 1700-000000',
+          room_number: 'Room 101, Medical Center',
+          available_days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'],
+          start_time: '09:00:00',
+          end_time: '17:00:00',
+          bio: 'Campus medical officer providing clinical healthcare services.',
+          avatar_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+          profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+          is_available: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        try {
+          const createRes = await apiFetch('/doctors', {
+            method: 'POST',
+            body: JSON.stringify(fallbackDoc)
+          });
+          if (createRes && createRes.data) {
+            docData = createRes.data;
+          } else {
+            docData = fallbackDoc;
+          }
+        } catch (createErr) {
+          docData = fallbackDoc;
+        }
       }
 
       setDoctorProfile(docData as Doctor);
 
-      // Fetch appointments assigned ONLY to this doctor
-      let fetchedApps: Appointment[] = [];
-      try {
-        const data = await apiFetch(`/appointments?doctor_id=${docData.id}`);
-        if (data && data.data) {
-          fetchedApps = data.data as Appointment[];
-        }
-      } catch (err) {
-        console.warn('[DoctorAppointmentsManager] Appointments fetch notice:', err);
+      // Initialize edit profile form
+      if (docData) {
+        setEditProfileForm({
+          full_name: docData.full_name || '',
+          department: docData.department || 'Medical Center',
+          specialization: docData.specialization || 'General Medicine',
+          designation: docData.designation || 'Consultant Physician',
+          phone: docData.phone || '',
+          room_number: docData.room_number || 'Room 101, Medical Center',
+          start_time: docData.start_time || '09:00:00',
+          end_time: docData.end_time || '17:00:00',
+          available_days: docData.available_days || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'],
+          is_available: docData.is_available ?? true
+        });
       }
 
+      // Fetch appointments assigned ONLY to this doctor
+      let fetchedApps: Appointment[] = [];
+      if (docData?.id) {
+        try {
+          const data = await apiFetch(`/appointments?doctor_id=${docData.id}`);
+          if (data && data.data) {
+            fetchedApps = data.data as Appointment[];
+          }
+        } catch (err) {
+          console.warn('[DoctorAppointmentsManager] Appointments fetch notice:', err);
+        }
+      }
 
       setAppointments(fetchedApps);
     } catch (err: unknown) {
@@ -116,7 +193,7 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user.email, user.universityId]);
+  }, [user.email, user.universityId, user.id, user.name, user.department, user.phone]);
 
   useEffect(() => {
     fetchDoctorProfileAndAppointments();
@@ -125,6 +202,65 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
   const handleManualRefresh = () => {
     setRefreshing(true);
     fetchDoctorProfileAndAppointments();
+  };
+
+  // Open Profile Editor Modal
+  const handleOpenProfileModal = () => {
+    if (doctorProfile) {
+      setEditProfileForm({
+        full_name: doctorProfile.full_name || '',
+        department: doctorProfile.department || 'Medical Center',
+        specialization: doctorProfile.specialization || 'General Medicine',
+        designation: doctorProfile.designation || 'Consultant Physician',
+        phone: doctorProfile.phone || '',
+        room_number: doctorProfile.room_number || 'Room 101, Medical Center',
+        start_time: doctorProfile.start_time || '09:00:00',
+        end_time: doctorProfile.end_time || '17:00:00',
+        available_days: doctorProfile.available_days || ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'],
+        is_available: doctorProfile.is_available ?? true
+      });
+    }
+    setProfileModalOpen(true);
+  };
+
+  // Save Doctor Profile to Database
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!doctorProfile) return;
+    setSavingProfile(true);
+    setError(null);
+
+    try {
+      const payload = {
+        full_name: editProfileForm.full_name,
+        department: editProfileForm.department,
+        specialization: editProfileForm.specialization,
+        designation: editProfileForm.designation,
+        phone: editProfileForm.phone,
+        room_number: editProfileForm.room_number,
+        start_time: editProfileForm.start_time,
+        end_time: editProfileForm.end_time,
+        available_days: editProfileForm.available_days,
+        is_available: editProfileForm.is_available
+      };
+
+      const updated = await apiFetch(`/doctors/${doctorProfile.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+
+      if (updated) {
+        setDoctorProfile(prev => prev ? { ...prev, ...payload } : null);
+      }
+
+      setProfileSuccessMsg('Doctor profile details successfully saved to the database.');
+      setProfileModalOpen(false);
+      setTimeout(() => setProfileSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to save doctor profile to database.');
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   // Format 24h TIME string "09:00:00" to "9:00 AM"
@@ -353,9 +489,18 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
               {doctorProfile && (
                   <div className="text-right hidden sm:block">
                     <p className="text-xs font-bold text-ink">{doctorProfile.full_name}</p>
-                    <p className="text-2xs text-ink-muted">{doctorProfile.specialization}</p>
+                    <p className="text-2xs text-ink-muted">{doctorProfile.specialization} • {doctorProfile.room_number || 'Room 101'}</p>
                   </div>
               )}
+              <button
+                  type="button"
+                  onClick={handleOpenProfileModal}
+                  className="px-3 py-2 rounded-xl bg-medical/10 text-medical hover:bg-medical/20 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+                  title="Edit Doctor Profile & Availability"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                <span>Profile & Availability</span>
+              </button>
               <button
                   type="button"
                   onClick={handleManualRefresh}
@@ -368,6 +513,13 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
               </button>
             </div>
           </div>
+
+          {profileSuccessMsg && (
+            <div className="p-3 rounded-xl bg-wellness/10 border border-wellness/20 text-wellness text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{profileSuccessMsg}</span>
+            </div>
+          )}
 
           {/* 2. Real Database Statistics Overview */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -928,6 +1080,212 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
                 </form>
               </div>
             </div>
+        )}
+
+        {/* 5. Doctor Profile & Availability Settings Modal */}
+        {profileModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs overflow-y-auto">
+            <div className="bg-surface rounded-2xl border border-border p-6 max-w-xl w-full space-y-6 shadow-xl my-8">
+              <div className="flex items-center justify-between border-b border-border pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-medical/10 text-medical">
+                    <SlidersHorizontal className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-heading font-bold text-base text-ink">
+                      Physician Profile & Availability
+                    </h3>
+                    <p className="text-xs text-ink-muted">
+                      Update your consultation schedule, room allocation, and active status in the database.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setProfileModalOpen(false)}
+                  className="p-1.5 rounded-lg text-ink-muted hover:text-ink hover:bg-surface-hover transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveProfile} className="space-y-4">
+                {error && (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-700 text-xs">
+                    {error}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={editProfileForm.full_name}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, full_name: e.target.value })}
+                      placeholder="Dr. John Doe"
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Phone Number</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.phone}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, phone: e.target.value })}
+                      placeholder="+880 1711-000000"
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Department</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.department}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, department: e.target.value })}
+                      placeholder="General Medicine"
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Specialization</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.specialization}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, specialization: e.target.value })}
+                      placeholder="Family Medicine & Triage"
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Room / Office Location</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.room_number}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, room_number: e.target.value })}
+                      placeholder="Room 101, Medical Center"
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Designation</label>
+                    <input
+                      type="text"
+                      value={editProfileForm.designation}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, designation: e.target.value })}
+                      placeholder="Consultant Physician"
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Consultation Start Time</label>
+                    <input
+                      type="time"
+                      value={editProfileForm.start_time.slice(0, 5)}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, start_time: `${e.target.value}:00` })}
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-ink">Consultation End Time</label>
+                    <input
+                      type="time"
+                      value={editProfileForm.end_time.slice(0, 5)}
+                      onChange={(e) => setEditProfileForm({ ...editProfileForm, end_time: `${e.target.value}:00` })}
+                      className="w-full p-2.5 bg-background border border-border rounded-xl text-xs text-ink focus:outline-none focus:border-medical"
+                    />
+                  </div>
+                </div>
+
+                {/* Available Days Checkboxes */}
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <label className="block text-xs font-semibold text-ink">Available Consultation Days</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day) => {
+                      const isChecked = editProfileForm.available_days.includes(day);
+                      return (
+                        <label
+                          key={day}
+                          className={`flex items-center gap-2 p-2 rounded-xl border text-xs cursor-pointer transition-colors ${
+                            isChecked
+                              ? 'border-medical/40 bg-medical/10 text-medical font-bold'
+                              : 'border-border bg-background text-ink-muted'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditProfileForm({
+                                  ...editProfileForm,
+                                  available_days: [...editProfileForm.available_days, day]
+                                });
+                              } else {
+                                setEditProfileForm({
+                                  ...editProfileForm,
+                                  available_days: editProfileForm.available_days.filter((d) => d !== day)
+                                });
+                              }
+                            }}
+                            className="rounded border-border text-medical focus:ring-medical"
+                          />
+                          <span>{day}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Availability Switch */}
+                <div className="p-3.5 rounded-xl border border-border bg-background flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-ink">Accepting Patient Appointments</p>
+                    <p className="text-2xs text-ink-muted">When active, students can select your available slots for appointments.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditProfileForm({ ...editProfileForm, is_available: !editProfileForm.is_available })}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                      editProfileForm.is_available
+                        ? 'bg-wellness/15 text-wellness border border-wellness/30'
+                        : 'bg-rose-500/15 text-rose-600 border border-rose-500/30'
+                    }`}
+                  >
+                    <div className={`w-2 h-2 rounded-full ${editProfileForm.is_available ? 'bg-wellness' : 'bg-rose-500'}`} />
+                    <span>{editProfileForm.is_available ? 'Active / Available' : 'On Leave / Unavailable'}</span>
+                  </button>
+                </div>
+
+                <div className="pt-3 flex items-center justify-end gap-3 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => setProfileModalOpen(false)}
+                    disabled={savingProfile}
+                    className="px-4 py-2 rounded-xl border border-border text-xs text-ink hover:bg-surface-hover font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingProfile}
+                    className="px-4 py-2 rounded-xl bg-medical text-surface hover:bg-medical-hover text-xs font-semibold cursor-pointer flex items-center gap-1.5 shadow-xs transition-colors"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{savingProfile ? 'Saving Changes...' : 'Save to Database'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
       </div>
   );

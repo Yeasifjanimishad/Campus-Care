@@ -36,6 +36,16 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
     let remoteDoctorUsers: any[] = [];
     let remoteApprovedRequests: any[] = [];
 
+    // Local storage fallback for instant responsiveness
+    let localApprovedRequests: any[] = [];
+    try {
+      const storedReqs = localStorage.getItem('campuscare_doctor_requests');
+      if (storedReqs) {
+        const parsed = JSON.parse(storedReqs);
+        localApprovedRequests = parsed.filter((r: any) => r.status === 'approved');
+      }
+    } catch (e) {}
+
     if (isSupabaseConfigured) {
       try {
         const queryParams = new URLSearchParams();
@@ -49,6 +59,15 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
       } catch (err) {
         console.warn('[Fetch Doctors] API error:', err);
       }
+
+      try {
+        const { data } = await supabase
+            .from('doctors')
+            .select('*');
+        if (data && data.length > 0) {
+          remoteDoctors = [...remoteDoctors, ...data];
+        }
+      } catch (err) {}
 
       try {
         const { data } = await supabase
@@ -69,43 +88,18 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
 
     const map = new Map<string, Doctor>();
 
-    // 1. Remote doctors table (already filtered by API)
-    remoteDoctors.forEach((d) => map.set(d.email.toLowerCase(), d));
-
-    // 3. Remote users table where role = 'doctor'
-    remoteDoctorUsers.forEach((u) => {
-      const key = u.email?.toLowerCase();
-      if (key && !map.has(key)) {
-        map.set(key, {
-          id: u.id || 'doc-' + key,
-          doctor_id: u.university_id || u.universityId || 'DOC-' + Math.floor(1000 + Math.random() * 9000),
-          full_name: u.name?.startsWith('Dr.') ? u.name : `Dr. ${u.name || 'Medical Officer'}`,
-          email: u.email,
-          department: u.department || 'Medical Center',
-          specialization: 'General Medicine & Clinical Care',
-          designation: 'Medical Officer / Doctor',
-          phone: u.phone || '+880 1700-000000',
-          bio: 'Campus medical officer providing healthcare services.',
-          profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
-          is_available: true,
-          created_at: u.created_at || new Date().toISOString(),
-          updated_at: u.updated_at || new Date().toISOString(),
-        });
-      }
-    });
-
-    // 4. Remote approved doctor access requests
-    remoteApprovedRequests.forEach((req) => {
-      const key = req.email?.toLowerCase();
+    // 1. Local approved requests
+    localApprovedRequests.forEach((req) => {
+      const key = req.email?.toLowerCase().trim();
       if (key) {
         map.set(key, {
-          id: req.user_id || req.id || 'doc-' + key,
-          doctor_id: req.university_id || 'DOC-' + Math.floor(1000 + Math.random() * 9000),
+          id: req.id,
+          doctor_id: req.doctor_id || 'DOC-APPROVED',
           full_name: req.full_name?.startsWith('Dr.') ? req.full_name : `Dr. ${req.full_name || 'Medical Officer'}`,
           email: req.email,
           department: req.department || 'Medical Center',
-          specialization: 'General Medicine & Clinical Care',
-          designation: 'Medical Officer / Doctor',
+          specialization: req.department || 'General Medicine',
+          designation: 'Consultant Physician',
           phone: req.phone || '+880 1700-000000',
           bio: req.message || 'Campus medical officer providing healthcare services.',
           profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
@@ -116,7 +110,70 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
       }
     });
 
-    // Only backend/Supabase doctor sources are used.
+    // 2. Remote users table where role = 'doctor'
+    remoteDoctorUsers.forEach((u) => {
+      const key = u.email?.toLowerCase().trim();
+      if (key) {
+        const existing = map.get(key);
+        map.set(key, {
+          id: u.id || existing?.id || 'doc-' + key,
+          doctor_id: u.university_id || u.universityId || existing?.doctor_id || 'DOC-' + Math.floor(1000 + Math.random() * 9000),
+          full_name: u.name?.startsWith('Dr.') ? u.name : `Dr. ${u.name || existing?.full_name || 'Medical Officer'}`,
+          email: u.email,
+          department: u.department || existing?.department || 'Medical Center',
+          specialization: existing?.specialization || 'General Medicine & Clinical Care',
+          designation: existing?.designation || 'Medical Officer / Doctor',
+          phone: u.phone || existing?.phone || '+880 1700-000000',
+          bio: existing?.bio || 'Campus medical officer providing healthcare services.',
+          profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+          is_available: true,
+          created_at: u.created_at || existing?.created_at || new Date().toISOString(),
+          updated_at: u.updated_at || new Date().toISOString(),
+        });
+      }
+    });
+
+    // 3. Remote approved doctor access requests
+    remoteApprovedRequests.forEach((req) => {
+      const key = req.email?.toLowerCase().trim();
+      if (key) {
+        const existing = map.get(key);
+        map.set(key, {
+          id: req.id || existing?.id || 'doc-' + key,
+          doctor_id: req.doctor_id || existing?.doctor_id || 'DOC-APPROVED',
+          full_name: req.full_name?.startsWith('Dr.') ? req.full_name : `Dr. ${req.full_name || existing?.full_name || 'Medical Officer'}`,
+          email: req.email,
+          department: req.department || existing?.department || 'Medical Center',
+          specialization: existing?.specialization || req.department || 'General Medicine & Clinical Care',
+          designation: existing?.designation || 'Consultant Physician',
+          phone: req.phone || existing?.phone || '+880 1700-000000',
+          bio: req.message || existing?.bio || 'Campus medical officer providing healthcare services.',
+          profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
+          is_available: true,
+          created_at: req.created_at || existing?.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    });
+
+    // 4. Remote doctors table (highest priority)
+    remoteDoctors.forEach((d) => {
+      const key = (d.email || '').toLowerCase().trim();
+      if (key) {
+        const existing = map.get(key);
+        map.set(key, {
+          ...existing,
+          ...d,
+          full_name: (d.full_name || (d as any).name || existing?.full_name || 'Dr. Medical Officer').startsWith('Dr.')
+            ? (d.full_name || (d as any).name || existing?.full_name)
+            : `Dr. ${d.full_name || (d as any).name || existing?.full_name || 'Medical Officer'}`,
+          doctor_id: d.doctor_id || existing?.doctor_id || 'DOC-OFFICER',
+          department: d.department || existing?.department || 'Medical Center',
+          specialization: d.specialization || existing?.specialization || 'General Medicine',
+          is_available: d.is_available ?? existing?.is_available ?? true
+        });
+      }
+    });
 
     setDoctors(Array.from(map.values()));
     setLoading(false);
