@@ -31,6 +31,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+// When running behind a proxy (e.g. Vite dev server proxy or load balancer), trust the X-Forwarded-For header
+app.set('trust proxy', true);
 const httpServer = createServer(app);
 const PORT = process.env.NODE_ENV === 'production' ? (process.env.PORT || 3000) : 4000;
 

@@ -239,7 +239,7 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
 
   // Realtime subscription setup
   useEffect(() => {
-    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    const token = localStorage.getItem('campuscare_session_token');
     if (!token) return;
 
     // Use ws:// or wss:// depending on protocol

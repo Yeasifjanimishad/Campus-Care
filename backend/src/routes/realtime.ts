@@ -18,18 +18,10 @@ export function setupRealtimeWebSocket(server: any) {
 
         if (data.type === 'auth') {
           const token = data.token;
-          if (token.startsWith('mock_token_')) {
-            const email = token.replace('mock_token_', '');
-            userId = `mock-user-${email}`;
-            userRole = email.includes('admin') ? 'super_admin' : 'student_faculty';
-          } else {
-            // Verify real token if possible, else skip for now
-            // Just basic decode
-            const decoded = jwt.decode(token) as any;
-            if (decoded && decoded.sub) {
-              userId = decoded.sub;
-              userRole = decoded.role || 'student_faculty';
-            }
+          const decoded = jwt.decode(token) as any;
+          if (decoded && decoded.sub) {
+            userId = decoded.sub;
+            userRole = decoded.role || 'student_faculty';
           }
 
           if (userId) {

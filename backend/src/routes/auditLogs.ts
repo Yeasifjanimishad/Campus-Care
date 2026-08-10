@@ -4,8 +4,6 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
-const MOCK_AUDIT_LOGS: any[] = [];
-
 // GET /api/admin/audit-logs
 router.get('/', requireAuth, requireAdmin, async (req, res, next) => {
   try {
@@ -36,33 +34,19 @@ router.get('/', requireAuth, requireAdmin, async (req, res, next) => {
 
       const { data, error, count } = await query;
       
-      if (!error && data) {
-        return res.json({
-          data,
-          total: count || 0,
-          page: pageNum,
-          limit: limitNum
-        });
+      if (error) {
+        throw new Error(error.message || 'Failed to fetch audit logs');
       }
-    } catch (sbErr) {
-      console.warn('[Audit Logs Fetch Warning]: Supabase query failed, returning mock data');
+
+      return res.json({
+        data: data || [],
+        total: count || 0,
+        page: pageNum,
+        limit: limitNum
+      });
+    } catch (err) {
+      next(err);
     }
-
-    let filtered = [...MOCK_AUDIT_LOGS];
-    if (action) filtered = filtered.filter(l => l.action === action);
-    if (actor_id) filtered = filtered.filter(l => l.actor_id === actor_id);
-    if (target_user_id) filtered = filtered.filter(l => l.target_user_id === target_user_id);
-    if (start_date) filtered = filtered.filter(l => new Date(l.created_at) >= new Date(start_date as string));
-    if (end_date) filtered = filtered.filter(l => new Date(l.created_at) <= new Date(end_date as string));
-
-    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    res.json({
-      data: filtered.slice(offset, offset + limitNum),
-      total: filtered.length,
-      page: pageNum,
-      limit: limitNum
-    });
   } catch (err) {
     next(err);
   }

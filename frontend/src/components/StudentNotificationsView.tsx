@@ -100,7 +100,7 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
       
       ws.onopen = () => {
         if (!isMounted) return;
-        const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+        const token = localStorage.getItem('campuscare_session_token');
         if (token) {
           ws?.send(JSON.stringify({ type: 'auth', token }));
         }

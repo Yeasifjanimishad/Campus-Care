@@ -5,13 +5,6 @@ import { AppError } from '../lib/errors.js';
 
 const router = Router();
 
-const MOCK_USERS: any[] = [
-  { id: 'mock-student-1', email: 'sokal@diu.edu.bd', name: 'Sokal Ahmed', role: 'student_faculty', status: 'active', university_id: '221-15-001', department: 'CSE' },
-  { id: 'mock-student-2', email: 'mishad242-35-739@diu.edu.bd', name: 'Yeasif Jani Mishad', role: 'student_faculty', status: 'active', university_id: '242-35-739', department: 'Software Engineering' },
-  { id: 'mock-doctor-1', email: 'doctor@diu.edu.bd', name: 'Dr. Mahbub Rahman', role: 'doctor', status: 'active', university_id: 'DOC-1001', department: 'Medical Center' },
-  { id: 'mock-superadmin-1', email: 'superadmin@diu.edu.bd', name: 'CampusCare Admin', role: 'super_admin', status: 'active', university_id: 'ADM-0001', department: 'Central Admin' },
-];
-
 // GET /api/admin/users
 router.get('/users', requireAuth, requireAdmin, async (req, res, next) => {
   try {
@@ -41,40 +34,19 @@ router.get('/users', requireAuth, requireAdmin, async (req, res, next) => {
         .range(offset, offset + limitNum - 1);
 
       const { data, error, count } = await query;
-      if (!error && data) {
-        return res.json({
-          data,
-          total: count,
-          page: pageNum,
-          limit: limitNum
-        });
+      if (error) {
+        throw new AppError(500, 'Failed to fetch users', error.message);
       }
-    } catch (sbErr) {
-      console.warn('[Admin Users Fetch Warning]: Supabase query failed, returning mock data');
-    }
 
-    let filtered = [...MOCK_USERS];
-    if (role) filtered = filtered.filter(u => u.role === role);
-    if (status) filtered = filtered.filter(u => u.status === status);
-    if (search) {
-      const searchLower = (search as string).toLowerCase();
-      filtered = filtered.filter(u => 
-        (u.name && u.name.toLowerCase().includes(searchLower)) ||
-        (u.email && u.email.toLowerCase().includes(searchLower)) ||
-        (u.university_id && u.university_id.toLowerCase().includes(searchLower))
-      );
+      return res.json({
+        data: data || [],
+        total: count || 0,
+        page: pageNum,
+        limit: limitNum
+      });
+    } catch (err) {
+      next(err);
     }
-    
-    // Default created_at
-    filtered = filtered.map(u => ({ ...u, created_at: u.created_at || new Date().toISOString() }));
-    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    res.json({
-      data: filtered,
-      total: filtered.length,
-      page: pageNum,
-      limit: limitNum
-    });
   } catch (err) {
     next(err);
   }
@@ -90,15 +62,15 @@ router.get('/users/:id', requireAuth, requireAdmin, async (req, res, next) => {
         .select('*')
         .eq('id', req.params.id)
         .single();
-        
-      if (!error && data) {
-        return res.json(data);
-      }
-    } catch (sbErr) {}
 
-    const user = MOCK_USERS.find(u => u.id === req.params.id);
-    if (!user) throw new AppError(404, 'User not found');
-    res.json(user);
+      if (error || !data) {
+        throw new AppError(404, 'User not found');
+      }
+
+      return res.json(data);
+    } catch (err) {
+      next(err);
+    }
   } catch (err) {
     next(err);
   }
@@ -117,16 +89,14 @@ router.put('/users/:id/role', requireAuth, requireSuperAdmin, async (req, res, n
         p_role: role
       });
 
-      if (!error && data) {
-        return res.json(data);
+      if (error) {
+        throw new AppError(500, 'Failed to update user role', error.message);
       }
-    } catch (sbErr) {}
 
-    const user = MOCK_USERS.find(u => u.id === req.params.id);
-    if (user) {
-      user.role = role;
+      return res.json(data);
+    } catch (err) {
+      next(err);
     }
-    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -145,16 +115,14 @@ router.put('/users/:id/status', requireAuth, requireAdmin, async (req, res, next
         p_status: status
       });
 
-      if (!error && data) {
-        return res.json(data);
+      if (error) {
+        throw new AppError(500, 'Failed to update user status', error.message);
       }
-    } catch (sbErr) {}
 
-    const user = MOCK_USERS.find(u => u.id === req.params.id);
-    if (user) {
-      user.status = status;
+      return res.json(data);
+    } catch (err) {
+      next(err);
     }
-    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -167,22 +135,14 @@ router.get('/stats', requireAuth, requireAdmin, async (req, res, next) => {
       const authClient = createAuthClient(req.token!);
       const { data, error } = await authClient.rpc('get_super_admin_stats');
       
-      if (!error && data) {
-        return res.json(data);
+      if (error) {
+        throw new AppError(500, 'Failed to fetch admin stats', error.message);
       }
-    } catch (sbErr) {
-      console.warn('[Admin Stats Fetch Warning]: Supabase query failed, returning mock data');
-    }
 
-    res.json({
-      total_users: MOCK_USERS.length,
-      active_incidents: 0,
-      active_sos: 0,
-      recent_appointments: 0,
-      doctors_count: MOCK_USERS.filter(u => u.role === 'doctor').length,
-      students_count: MOCK_USERS.filter(u => u.role === 'student_faculty').length,
-      pending_verifications: 0,
-    });
+      return res.json(data);
+    } catch (err) {
+      next(err);
+    }
   } catch (err) {
     next(err);
   }

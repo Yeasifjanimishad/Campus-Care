@@ -219,7 +219,7 @@ export const AdminSosMonitor: React.FC<AdminSosMonitorProps> = ({ user }) => {
 
   // Realtime WebSocket subscription for admin monitor
   useEffect(() => {
-    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    const token = localStorage.getItem('campuscare_session_token');
     if (!token) return;
 
     // Use ws:// or wss:// depending on protocol

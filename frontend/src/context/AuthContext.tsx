@@ -77,12 +77,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initializeAuth = async () => {
       try {
         if (!isSupabaseConfigured) {
-          // Check for local stored token
-          const storedToken = localStorage.getItem('campuscare_session_token');
-          if (storedToken && isMounted) {
-            const profile = await fetchUserProfile();
-            if (isMounted && profile) setUserProfile(profile);
-          }
           if (isMounted) setLoading(false);
           return;
         }
@@ -96,13 +90,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setSession(data.session);
           if (data.session.user) {
             const profile = await fetchUserProfile(data.session.user);
-            if (isMounted && profile) setUserProfile(profile);
-          }
-        } else {
-          // Check fallback token in case of standalone session
-          const storedToken = localStorage.getItem('campuscare_session_token');
-          if (storedToken && isMounted) {
-            const profile = await fetchUserProfile();
             if (isMounted && profile) setUserProfile(profile);
           }
         }
@@ -129,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUserProfile(profile);
             setLoading(false);
           }
-        } else if (!localStorage.getItem('campuscare_session_token')) {
+        } else {
           if (isMounted) {
             setUserProfile(null);
             setLoading(false);
@@ -169,7 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data.session) {
         localStorage.setItem('campuscare_session_token', data.session.access_token);
 
-        if (isSupabaseConfigured && !data.session.access_token.startsWith('mock_token_')) {
+        if (isSupabaseConfigured) {
           try {
             await supabase.auth.setSession({
               access_token: data.session.access_token,
@@ -210,7 +197,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('[Backend SignOut Notice]:', err?.message || err);
     } finally {
       localStorage.removeItem('campuscare_session_token');
-      localStorage.removeItem('campuscare_mock_token');
       if (isSupabaseConfigured) {
         try {
           await supabase.auth.signOut();

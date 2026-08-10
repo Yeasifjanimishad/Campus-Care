@@ -131,7 +131,7 @@ export const StudentSosManager: React.FC<StudentSosManagerProps> = ({ user }) =>
 
   // Set up WebSocket connection for real-time updates
   useEffect(() => {
-    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    const token = localStorage.getItem('campuscare_session_token');
     if (!token) return;
 
     // Use ws:// or wss:// depending on protocol

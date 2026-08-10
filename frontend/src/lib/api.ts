@@ -11,8 +11,7 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
       headers.set('Authorization', `Bearer ${session.access_token}`);
     }
   } else {
-    // Fallback to local storage for mock auth
-    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    const token = localStorage.getItem('campuscare_session_token');
     if (token) {
       headers.set('Authorization', `Bearer ${token}`);
     }
@@ -33,7 +32,6 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
       await supabase.auth.signOut();
     } else {
       localStorage.removeItem('campuscare_session_token');
-      localStorage.removeItem('campuscare_mock_token');
     }
     window.location.hash = 'login';
     throw new Error('Unauthorized');

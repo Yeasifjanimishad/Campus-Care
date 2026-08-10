@@ -5,82 +5,19 @@ import { AppError } from '../lib/errors.js';
 
 const router = Router();
 
-const SEED_DOCTORS = [
-  {
-    id: 'seed-1',
-    doctor_id: 'DOC-2001',
-    full_name: 'Dr. Ayesha Rahman',
-    email: 'ayesha.medical@diu.edu.bd',
-    department: 'Medical Center',
-    specialization: 'General Medicine',
-    designation: 'Chief Medical Officer',
-    phone: '+880 1711-001122',
-    bio: 'Experienced Chief Medical Officer providing comprehensive primary healthcare and preventive medicine to campus students and faculty.',
-    profile_image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=300',
-    is_available: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'seed-2',
-    doctor_id: 'DOC-2002',
-    full_name: 'Dr. Tanvir Ahmed',
-    email: 'tanvir.psych@diu.edu.bd',
-    department: 'Counseling Unit',
-    specialization: 'Psychiatry & Mental Health',
-    designation: 'Senior Clinical Consultant',
-    phone: '+880 1819-334455',
-    bio: 'Specialist in student mental health, stress management, cognitive therapy, and adolescent psychological support.',
-    profile_image_url: 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?auto=format&fit=crop&q=80&w=300',
-    is_available: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'seed-3',
-    doctor_id: 'DOC-2003',
-    full_name: 'Dr. Nusrat Jahan',
-    email: 'nusrat.derm@diu.edu.bd',
-    department: 'Health Center',
-    specialization: 'Dermatology & Wellness',
-    designation: 'Consultant Dermatologist',
-    phone: '+880 1912-556677',
-    bio: 'Expert in skin health, allergic conditions, wellness counseling, and clinical allergy management.',
-    profile_image_url: 'https://images.unsplash.com/photo-1594824813566-88855ce78961?auto=format&fit=crop&q=80&w=300',
-    is_available: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'seed-4',
-    doctor_id: 'DOC-2004',
-    full_name: 'Dr. Fahim Hasan',
-    email: 'fahim.emergency@diu.edu.bd',
-    department: 'Emergency & Care Unit',
-    specialization: 'Emergency Medicine',
-    designation: 'On-Call Emergency Lead',
-    phone: '+880 1515-778899',
-    bio: 'Specialized emergency responder overseeing campus 24/7 SOS triage, trauma stabilization, and critical care.',
-    profile_image_url: 'https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&q=80&w=300',
-    is_available: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
-// GET /api/doctors
+// GET /api/doctors - Fetch registered doctors from database
 router.get('/', requireAuth, async (req, res, next) => {
   try {
-    const { department, specialization, search, available, page = 1, limit = 20 } = req.query;
+    const { department, specialization, search, available, page = 1, limit = 50 } = req.query;
 
     const pageNum = parseInt(page as string) || 1;
-    const limitNum = parseInt(limit as string) || 20;
+    const limitNum = parseInt(limit as string) || 50;
     const offset = (pageNum - 1) * limitNum;
 
     try {
       let query = supabaseAdmin
-        .from('doctors')
-        .select('*', { count: 'exact' });
+          .from('doctors')
+          .select('*', { count: 'exact' });
 
       if (department && department !== 'All') {
         query = query.eq('department', department);
@@ -96,36 +33,73 @@ router.get('/', requireAuth, async (req, res, next) => {
       }
 
       query = query
-        .order('full_name', { ascending: true })
-        .range(offset, offset + limitNum - 1);
+          .order('full_name', { ascending: true })
+          .range(offset, offset + limitNum - 1);
 
       const { data, error, count } = await query;
 
       if (!error && data && data.length > 0) {
         return res.json({
           data,
-          total: count,
+          total: count || data.length,
+          page: pageNum,
+          limit: limitNum
+        });
+      }
+
+      // If doctors table has no rows, check users table for any accounts with role='doctor'
+      const { data: doctorUsers, error: userError } = await supabaseAdmin
+          .from('users')
+          .select('*')
+          .eq('role', 'doctor');
+
+      if (!userError && doctorUsers && doctorUsers.length > 0) {
+        const dynamicDoctors = doctorUsers.map(u => ({
+          id: u.id,
+          doctor_id: u.university_id || 'DOC-UNASSIGNED',
+          user_id: u.id,
+          full_name: u.name,
+          email: u.email,
+          department: u.department || 'Medical Center',
+          specialization: 'General Medicine',
+          designation: 'Medical Officer',
+          phone: u.phone || '',
+          bio: '',
+          profile_image_url: '',
+          is_available: true,
+          created_at: u.created_at || new Date().toISOString(),
+          updated_at: u.updated_at || new Date().toISOString(),
+        }));
+
+        let filtered = dynamicDoctors;
+        if (department && department !== 'All') {
+          filtered = filtered.filter(d => d.department === department);
+        }
+        if (search) {
+          const q = (search as string).toLowerCase();
+          filtered = filtered.filter(d =>
+              d.full_name?.toLowerCase().includes(q) ||
+              d.specialization?.toLowerCase().includes(q) ||
+              d.department?.toLowerCase().includes(q) ||
+              d.email?.toLowerCase().includes(q)
+          );
+        }
+
+        return res.json({
+          data: filtered.slice(offset, offset + limitNum),
+          total: filtered.length,
           page: pageNum,
           limit: limitNum
         });
       }
     } catch (sbErr) {
-      console.warn('[Doctors Fetch Warning]: Supabase query failed, falling back to seed data');
+      console.warn('[Doctors Fetch Warning]: Database query failed or unconfigured');
     }
 
-    // Fallback to seed doctors
-    let filtered = [...SEED_DOCTORS];
-    if (department && department !== 'All') {
-      filtered = filtered.filter(d => d.department === department);
-    }
-    if (search) {
-      const q = (search as string).toLowerCase();
-      filtered = filtered.filter(d => d.full_name.toLowerCase().includes(q) || d.specialization.toLowerCase().includes(q));
-    }
-
+    // Return empty list if no doctors found in database
     res.json({
-      data: filtered,
-      total: filtered.length,
+      data: [],
+      total: 0,
       page: pageNum,
       limit: limitNum
     });
@@ -134,28 +108,50 @@ router.get('/', requireAuth, async (req, res, next) => {
   }
 });
 
-// GET /api/doctors/:id
+// GET /api/doctors/:id - Fetch single doctor by ID
 router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
 
     try {
       const { data, error } = await supabaseAdmin
-        .from('doctors')
-        .select('*')
-        .eq('id', id)
-        .single();
+          .from('doctors')
+          .select('*')
+          .or(`id.eq.${id},doctor_id.eq.${id},user_id.eq.${id}`)
+          .maybeSingle();
 
       if (!error && data) {
         return res.json(data);
       }
-    } catch (sbErr) {
-      console.warn('[Doctor Fetch ID Warning]: Supabase query failed, checking SEED_DOCTORS');
-    }
 
-    const seedDoc = SEED_DOCTORS.find(d => d.id === id || d.doctor_id === id) || SEED_DOCTORS[0];
-    if (seedDoc) {
-      return res.json(seedDoc);
+      // Also check users table where role = 'doctor'
+      const { data: userDoc, error: userError } = await supabaseAdmin
+          .from('users')
+          .select('*')
+          .eq('role', 'doctor')
+          .or(`id.eq.${id},university_id.eq.${id}`)
+          .maybeSingle();
+
+      if (!userError && userDoc) {
+        return res.json({
+          id: userDoc.id,
+          doctor_id: userDoc.university_id || 'DOC-UNASSIGNED',
+          user_id: userDoc.id,
+          full_name: userDoc.name,
+          email: userDoc.email,
+          department: userDoc.department || 'Medical Center',
+          specialization: 'General Medicine',
+          designation: 'Medical Officer',
+          phone: userDoc.phone || '',
+          bio: '',
+          profile_image_url: '',
+          is_available: true,
+          created_at: userDoc.created_at || new Date().toISOString(),
+          updated_at: userDoc.updated_at || new Date().toISOString(),
+        });
+      }
+    } catch (sbErr) {
+      console.warn('[Doctor Fetch ID Warning]: Database query failed');
     }
 
     throw new AppError(404, 'Doctor not found');
@@ -164,7 +160,7 @@ router.get('/:id', requireAuth, async (req, res, next) => {
   }
 });
 
-// PUT /api/doctors/:id
+// PUT /api/doctors/:id - Update doctor profile
 router.put('/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -174,10 +170,10 @@ router.put('/:id', requireAuth, async (req, res, next) => {
 
     // Check existing doctor
     const { data: doctor, error: docError } = await supabaseAdmin
-      .from('doctors')
-      .select('id, user_id')
-      .eq('id', id)
-      .single();
+        .from('doctors')
+        .select('id, user_id')
+        .eq('id', id)
+        .single();
 
     if (docError || !doctor) {
       throw new AppError(404, 'Doctor not found');
@@ -199,11 +195,11 @@ router.put('/:id', requireAuth, async (req, res, next) => {
     updateData.updated_at = new Date().toISOString();
 
     const { data, error } = await supabaseAdmin
-      .from('doctors')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
+        .from('doctors')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
 
     if (error) {
       throw new AppError(500, 'Failed to update doctor profile', error.message);
