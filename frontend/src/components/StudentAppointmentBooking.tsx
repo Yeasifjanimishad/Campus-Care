@@ -20,6 +20,7 @@ import {
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Doctor, UserProfile, Appointment } from '../types';
 import { FALLBACK_SEED_DOCTORS } from '../data/mockDoctors';
+import { apiFetch } from '../lib/api';
 
 interface StudentAppointmentBookingProps {
   user?: UserProfile;
@@ -290,29 +291,14 @@ export const StudentAppointmentBooking: React.FC<StudentAppointmentBookingProps>
     const fetchBookedSlots = async () => {
       setLoadingSlots(true);
       try {
-        const { data, error } = await supabase.rpc('get_booked_slots', {
-          p_doctor_id: selectedDoctor.id,
-          p_appointment_date: appointmentDate,
-        });
+        const data = await apiFetch(`/appointments/booked-slots?doctor_id=${selectedDoctor.id}&date=${appointmentDate}`);
 
-        if (!error && data) {
+        if (data) {
           // Data is array of { start_time, end_time, status }
           const bookedTimes = data.map((item: { start_time: string }) => item.start_time);
           setBookedSlotTimes(bookedTimes);
         } else {
-          // Fallback direct table query if RPC not present in environment
-          const { data: directData } = await supabase
-            .from('appointments')
-            .select('start_time')
-            .eq('doctor_id', selectedDoctor.id)
-            .eq('appointment_date', appointmentDate)
-            .in('status', ['pending', 'confirmed']);
-
-          if (directData) {
-            setBookedSlotTimes(directData.map((d) => d.start_time));
-          } else {
-            setBookedSlotTimes([]);
-          }
+          setBookedSlotTimes([]);
         }
       } catch (err) {
         console.warn('[StudentAppointmentBooking]: Error fetching booked slots', err);

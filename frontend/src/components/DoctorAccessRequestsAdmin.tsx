@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { DoctorAccessRequest } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
 const FALLBACK_SEED_REQUESTS: DoctorAccessRequest[] = [
@@ -108,16 +109,12 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
 
     if (isSupabaseConfigured) {
       try {
-        const { data, error } = await supabase
-          .from('doctor_access_requests')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!error && data && data.length > 0) {
-          remoteList = data as DoctorAccessRequest[];
+        const response = await apiFetch('/doctor-requests');
+        if (response.data && response.data.length > 0) {
+          remoteList = response.data as DoctorAccessRequest[];
         }
       } catch (err: any) {
-        console.warn('[Fetch Doctor Access Requests]: Supabase query notice:', err?.message || err);
+        console.warn('[Fetch Doctor Access Requests]: API query notice:', err?.message || err);
       }
     }
 
@@ -155,16 +152,9 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
 
     if (isSupabaseConfigured) {
       try {
-        const { error: rpcErr } = await supabase.rpc('approve_doctor_access_request', {
-          p_request_id: request.id,
+        await apiFetch(`/doctor-requests/${request.id}/approve`, {
+          method: 'POST'
         });
-
-        if (rpcErr) {
-          await supabase
-            .from('doctor_access_requests')
-            .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-            .eq('id', request.id);
-        }
       } catch (err: any) {
         console.warn('[Approve Doctor Request Notice]: Falling back to local state update:', err);
       }
@@ -196,21 +186,12 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
 
     if (isSupabaseConfigured) {
       try {
-        const { error: rpcErr } = await supabase.rpc('reject_doctor_access_request', {
-          p_request_id: rejectingRequest.id,
-          p_review_note: rejectNote.trim() || null,
+        await apiFetch(`/doctor-requests/${rejectingRequest.id}/reject`, {
+          method: 'POST',
+          body: JSON.stringify({
+            review_note: rejectNote.trim() || undefined
+          })
         });
-
-        if (rpcErr) {
-          await supabase
-            .from('doctor_access_requests')
-            .update({
-              status: 'rejected',
-              review_note: rejectNote.trim() || null,
-              reviewed_at: new Date().toISOString()
-            })
-            .eq('id', rejectingRequest.id);
-        }
       } catch (err: any) {
         console.warn('[Reject Doctor Request Notice]: Falling back to local state update:', err);
       }

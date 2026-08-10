@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { 
   Stethoscope, 
   Search, 
@@ -15,6 +15,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { Doctor, UserProfile } from '../types';
 import { FALLBACK_SEED_DOCTORS } from '../data/mockDoctors';
 
@@ -30,7 +31,7 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
   const [updatingAvailabilityId, setUpdatingAvailabilityId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const fetchDoctors = async () => {
+  const fetchDoctors = useCallback(async () => {
     setLoading(true);
     let remoteDoctors: Doctor[] = [];
     let remoteDoctorUsers: any[] = [];
@@ -38,12 +39,17 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
 
     if (isSupabaseConfigured) {
       try {
-        const { data } = await supabase
-          .from('doctors')
-          .select('*')
-          .order('full_name', { ascending: true });
-        if (data && data.length > 0) remoteDoctors = data as Doctor[];
-      } catch (err) {}
+        const queryParams = new URLSearchParams();
+        if (selectedDept !== 'All') queryParams.append('department', selectedDept);
+        if (searchQuery.trim()) queryParams.append('search', searchQuery.trim());
+        
+        const response = await apiFetch(`/doctors?${queryParams.toString()}`);
+        if (response && response.data) {
+          remoteDoctors = response.data;
+        }
+      } catch (err) {
+        console.warn('[Fetch Doctors] API error:', err);
+      }
 
       try {
         const { data } = await supabase
@@ -67,7 +73,7 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
     // 1. Seed doctors
     FALLBACK_SEED_DOCTORS.forEach((d) => map.set(d.email.toLowerCase(), d));
 
-    // 2. Remote doctors table
+    // 2. Remote doctors table (already filtered by API)
     remoteDoctors.forEach((d) => map.set(d.email.toLowerCase(), d));
 
     // 3. Remote users table where role = 'doctor'
@@ -181,11 +187,15 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
 
     setDoctors(Array.from(map.values()));
     setLoading(false);
-  };
+  }, [selectedDept, searchQuery]);
 
+  // Debounce effect for search
   useEffect(() => {
-    fetchDoctors();
-  }, []);
+    const timer = setTimeout(() => {
+      fetchDoctors();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [fetchDoctors]);
 
   // Filter logic
   const departments = ['All', ...Array.from(new Set(doctors.map((d) => d.department)))];
@@ -210,14 +220,25 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({ user }) => {
     const newStatus = !doc.is_available;
 
     try {
-      const { error } = await supabase
-        .from('doctors')
-        .update({ is_available: newStatus, updated_at: new Date().toISOString() })
-        .eq('id', doc.id);
-
-      if (error) {
-        setStatusMessage({ type: 'error', message: `Failed to update status: ${error.message}` });
+      if (isSupabaseConfigured) {
+        const response = await apiFetch(`/doctors/${doc.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            is_available: newStatus
+          })
+        });
+        
+        if (response) {
+          setDoctors((prev) =>
+            prev.map((item) => (item.id === doc.id ? { ...item, is_available: newStatus } : item))
+          );
+          setStatusMessage({
+            type: 'success',
+            message: `Availability updated to ${newStatus ? 'Available' : 'Unavailable'}.`,
+          });
+        }
       } else {
+        // Fallback for local testing without Supabase
         setDoctors((prev) =>
           prev.map((item) => (item.id === doc.id ? { ...item, is_available: newStatus } : item))
         );

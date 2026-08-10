@@ -20,6 +20,8 @@ import { PageRoute, DoctorAccessRequest } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { ALLOWED_EMAIL_DOMAIN, isValidUniversityEmail } from '../lib/config';
 
+import { apiFetch } from '../lib/api';
+
 interface DoctorRequestAccessProps {
   onNavigate: (route: PageRoute) => void;
 }
@@ -81,14 +83,11 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
     setIsLoading(true);
 
     try {
-      // 1. Secure RPC duplicate check (returns boolean flags without exposing request records)
-      const { data: checkData, error: checkErr } = await supabase.rpc('check_doctor_request_exists', {
-        p_email: cleanEmail,
-        p_doctor_id: cleanDocId,
-      });
-
-      if (!checkErr && checkData && checkData.length > 0) {
-        const statusInfo = checkData[0];
+      // 1. Check for duplicates
+      const checkResponse = await apiFetch(`/doctor-requests/check-duplicate?email=${encodeURIComponent(cleanEmail)}&doctor_id=${encodeURIComponent(cleanDocId)}`);
+      
+      if (checkResponse && checkResponse.length > 0) {
+        const statusInfo = checkResponse[0];
         if (statusInfo.exists_pending) {
           setIsLoading(false);
           setFormErrorBanner(
@@ -106,54 +105,38 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
         }
       }
 
-      // 2. Insert new access request
-      const { data: insertedData, error: insertErr } = await supabase
-        .from('doctor_access_requests')
-        .insert([
-          {
-            full_name: cleanName,
-            doctor_id: cleanDocId,
-            email: cleanEmail,
-            department: cleanDept,
-            phone: cleanPhone || null,
-            message: cleanMsg || null,
-            status: 'pending',
-          },
-        ])
-        .select()
-        .single();
-
-      if (insertErr) {
-        console.error('[Doctor Access Request Insert Error]:', {
-          message: insertErr.message,
-          code: insertErr.code,
-          details: insertErr.details,
-        });
-
-        setIsLoading(false);
-
-        if (insertErr.code === '23505') {
-          setFormErrorBanner('A request for this email or Doctor ID already exists in the system.');
-        } else {
-          setFormErrorBanner(insertErr.message || 'Failed to submit request. Please try again.');
-        }
-        return;
-      }
+      // 2. Secure insert via backend API
+      const response = await apiFetch('/doctor-requests', {
+        method: 'POST',
+        body: JSON.stringify({
+          full_name: cleanName,
+          email: cleanEmail,
+          doctor_id: cleanDocId,
+          department: cleanDept,
+          phone: cleanPhone || undefined,
+          message: cleanMsg || undefined
+        })
+      });
 
       setIsLoading(false);
       setSubmittedData({
-        full_name: cleanName,
-        doctor_id: cleanDocId,
-        email: cleanEmail,
-        department: cleanDept,
-        created_at: new Date().toISOString(),
+        full_name: response.data.full_name,
+        doctor_id: response.data.doctor_id,
+        email: response.data.email,
+        department: response.data.department,
+        created_at: response.data.created_at,
       });
       setIsSubmitted(true);
 
     } catch (err: any) {
       setIsLoading(false);
       console.error('[Doctor Request Exception]:', err);
-      setFormErrorBanner(err?.message || 'An unexpected error occurred. Please try again.');
+      const msg = err?.message || 'An unexpected error occurred. Please try again.';
+      if (msg.includes('already exists')) {
+        setFormErrorBanner(msg);
+      } else {
+        setFormErrorBanner(msg);
+      }
     }
   };
 

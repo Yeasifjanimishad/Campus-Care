@@ -19,6 +19,7 @@ import { AuthLayout } from '../components/AuthLayout';
 import { PageRoute } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { ALLOWED_EMAIL_DOMAIN, isValidUniversityEmail } from '../lib/config';
+import { apiFetch } from '../lib/api';
 
 interface SignupPageProps {
   onNavigate: (route: PageRoute) => void;
@@ -87,87 +88,31 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
     // Halt if validation errors exist
     if (Object.keys(newErrors).length > 0) return;
 
-    // Check if Supabase configuration is valid
-    if (!isSupabaseConfigured) {
-      setFormErrorBanner('Authentication service is not configured. Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.');
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      // 1. Call real Supabase auth.signUp with strictly 'student_faculty' role
       const cleanEmail = email.trim();
       const cleanName = fullName.trim();
       const cleanId = universityId.trim();
       const cleanDept = department.trim();
       const cleanPhone = phone.trim();
-      const assignedRole = 'student_faculty';
 
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: password,
-        options: {
-          data: {
-            full_name: cleanName,
-            university_id: cleanId,
-            role: assignedRole,
-            department: cleanDept || null,
-            phone: cleanPhone || null,
-          },
-        },
+      const response = await apiFetch('/auth/signup', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: cleanEmail,
+          password: password,
+          name: cleanName,
+          university_id: cleanId,
+          department: cleanDept || undefined,
+          phone: cleanPhone || undefined
+        })
       });
 
-      if (authError) {
-        console.warn('[Supabase Signup Notice]:', {
-          operation: 'signUp',
-          message: authError.message,
-          status: authError.status,
-          code: (authError as any).code,
-        });
-
-        setIsLoading(false);
-        const message = authError.message || 'An error occurred during registration.';
-
-        if (message.toLowerCase().includes('already registered') || message.toLowerCase().includes('already exists')) {
-          setFormErrorBanner('This email is already registered. Try logging in instead.');
-        } else if (message.toLowerCase().includes('weak password')) {
-          setErrors((prev) => ({ ...prev, password: 'Password is too weak. Please use a stronger password.' }));
-        } else {
-          setFormErrorBanner(message);
-        }
-        return;
-      }
-
-      if (!authData?.user) {
-        setIsLoading(false);
-        console.warn('[Supabase Signup Notice]: No user data returned from Supabase Auth');
-        setFormErrorBanner('Registration failed. No user record was returned by the authentication service.');
-        return;
-      }
-
-      console.log('[Supabase Signup Success]: User created in Supabase Auth:', authData.user.id);
-
-      // 2. Attempt upsert into public.users table
-      const { error: dbError } = await supabase
-        .from('users')
-        .upsert([
-          {
-            id: authData.user.id,
-            name: cleanName,
-            email: cleanEmail,
-            university_id: cleanId,
-            role: assignedRole,
-            department: cleanDept || null,
-            phone: cleanPhone || null,
-          },
-        ], { onConflict: 'id' });
-
-      if (dbError) {
-        console.warn('[Supabase public.users Upsert Warning]:', {
-          message: dbError.message,
-          code: dbError.code,
-          details: dbError.details,
+      if (response.session) {
+        await supabase.auth.setSession({
+          access_token: response.session.access_token,
+          refresh_token: response.session.refresh_token
         });
       }
 
@@ -177,8 +122,16 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
 
     } catch (err: any) {
       setIsLoading(false);
-      console.warn('[Supabase Signup Exception]:', err?.message || err);
-      setFormErrorBanner(err?.message || 'An unexpected error occurred during registration.');
+      console.warn('[Backend Signup Exception]:', err?.message || err);
+      const message = err?.message || 'An unexpected error occurred during registration.';
+      
+      if (message.toLowerCase().includes('already registered') || message.toLowerCase().includes('already exists')) {
+        setFormErrorBanner('This email is already registered. Try logging in instead.');
+      } else if (message.toLowerCase().includes('weak password')) {
+        setErrors((prev) => ({ ...prev, password: 'Password is too weak. Please use a stronger password.' }));
+      } else {
+        setFormErrorBanner(message);
+      }
     }
   };
 
