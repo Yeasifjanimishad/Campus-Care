@@ -19,7 +19,7 @@ import {
   ShieldAlert,
   Info
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { Broadcast, UserProfile, BroadcastCategory, BroadcastPriority, BroadcastTargetRole } from '../types';
 
 interface AdminBroadcastManagerProps {
@@ -120,20 +120,13 @@ export const AdminBroadcastManager: React.FC<AdminBroadcastManagerProps> = ({ us
       const localList = getLocalBroadcasts();
       let remoteList: Broadcast[] = [];
 
-      if (isSupabaseConfigured) {
-        const { data, error: fetchErr } = await supabase
-          .from('broadcasts')
-          .select(`
-            *,
-            creator:users!broadcasts_created_by_fkey (name, email)
-          `)
-          .order('created_at', { ascending: false });
-
-        if (fetchErr) {
-          console.warn('Notice fetching broadcasts from Supabase:', fetchErr.message);
-        } else if (data && data.length > 0) {
-          remoteList = data as Broadcast[];
+      try {
+        const response = await apiFetch('/broadcasts?limit=100');
+        if (response && response.data) {
+          remoteList = response.data;
         }
+      } catch (fetchErr: any) {
+        console.warn('Notice fetching broadcasts from backend:', fetchErr.message);
       }
 
       // Merge local, remote, and sample broadcasts
@@ -225,32 +218,20 @@ export const AdminBroadcastManager: React.FC<AdminBroadcastManagerProps> = ({ us
 
       if (isSupabaseConfigured) {
         try {
-          const { data: rpcData, error: rpcErr } = await supabase.rpc('create_broadcast', {
-            p_title: title.trim(),
-            p_message: message.trim(),
-            p_category: category,
-            p_priority: priority,
-            p_target_role: targetRole
-          });
-
-          if (!rpcErr && rpcData?.success) {
-            sentSuccess = true;
-            setFormSuccess(`Broadcast sent! Delivered to ${rpcData.recipient_count || 1} user accounts.`);
-          } else {
-            console.warn('[Broadcast RPC Notice]: RPC call failed or unavailable, using table insert or local fallback', rpcErr?.message);
-            const { error: insertErr } = await supabase.from('broadcasts').insert([{
+          const response = await apiFetch('/broadcasts', {
+            method: 'POST',
+            body: JSON.stringify({
               title: title.trim(),
               message: message.trim(),
               category,
               priority,
-              target_role: targetRole,
-              created_by: user.id || 'usr-admin'
-            }]);
+              target_role: targetRole
+            })
+          });
 
-            if (!insertErr) {
-              sentSuccess = true;
-              setFormSuccess('Broadcast published successfully!');
-            }
+          if (response && response.success) {
+            sentSuccess = true;
+            setFormSuccess(`Broadcast sent! Delivered to ${response.recipient_count || 0} user accounts.`);
           }
         } catch (e: any) {
           console.warn('[Broadcast Dispatch Exception]:', e);

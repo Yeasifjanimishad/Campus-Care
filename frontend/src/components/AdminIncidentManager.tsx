@@ -19,7 +19,7 @@ import {
   ShieldCheck,
   RefreshCw
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { UserProfile, IncidentReport, IncidentCategory, IncidentReportStatus } from '../types';
 
 interface AdminIncidentManagerProps {
@@ -146,56 +146,16 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
     const local = getLocalIncidentReports();
     let loadedRemote: IncidentReport[] = [];
 
-    if (isSupabaseConfigured) {
-      try {
-        if (showLoading) setLoading(true);
-        setErrorMsg(null);
+    try {
+      if (showLoading) setLoading(true);
+      setErrorMsg(null);
 
-        // Join reporter details if available
-        const { data, error } = await supabase
-          .from('incident_reports')
-          .select(`
-            *,
-            reporter:users!reporter_id (
-              id,
-              name,
-              email,
-              university_id,
-              department,
-              phone
-            )
-          `)
-          .order('created_at', { ascending: false });
-
-        if (error) {
-          const { data: rawData, error: rawError } = await supabase
-            .from('incident_reports')
-            .select('*')
-            .order('created_at', { ascending: false });
-
-          if (!rawError && rawData && rawData.length > 0) {
-            const reporterIds = Array.from(new Set(rawData.map((r: any) => r.reporter_id).filter(Boolean)));
-            let userMap: Record<string, any> = {};
-            if (reporterIds.length > 0) {
-              const { data: usersData } = await supabase
-                .from('users')
-                .select('id, name, email, university_id, department, phone')
-                .in('id', reporterIds);
-              if (usersData) {
-                userMap = Object.fromEntries(usersData.map((u: any) => [u.id, u]));
-              }
-            }
-            loadedRemote = rawData.map((r: any) => ({
-              ...r,
-              reporter: userMap[r.reporter_id] || null
-            }));
-          }
-        } else if (data) {
-          loadedRemote = data as IncidentReport[];
-        }
-      } catch (err: any) {
-        console.warn('[AdminIncidentManager] Supabase fetch notice:', err?.message || err);
+      const response = await apiFetch('/incidents?limit=100');
+      if (response && response.data) {
+        loadedRemote = response.data;
       }
+    } catch (err: any) {
+      console.warn('[AdminIncidentManager] API fetch notice:', err?.message || err);
     }
 
     // Merge remote, local storage, and sample fallback reports
@@ -226,8 +186,8 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
     mergedList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     setReports(mergedList);
 
-    // Fetch signed URLs for private evidence images if available
-    if (mergedList.length > 0 && isSupabaseConfigured) {
+    // Fetch signed URLs for private evidence images via backend API
+    if (mergedList.length > 0) {
       try {
         const urlMap: Record<string, string[]> = {};
         for (const report of mergedList) {
@@ -237,12 +197,10 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
               if (path.startsWith('http')) {
                 urls.push(path);
               } else {
-                const { data: signedData } = await supabase.storage
-                  .from('incident-evidence')
-                  .createSignedUrl(path, 3600);
-                if (signedData?.signedUrl) {
-                  urls.push(signedData.signedUrl);
-                }
+                try {
+                  const data = await apiFetch(`/upload/incident-evidence/${encodeURIComponent(path)}`);
+                  if (data.url) urls.push(data.url);
+                } catch (e) {}
               }
             }
             urlMap[report.id] = urls;
@@ -250,7 +208,7 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
         }
         setImageUrlsMap(urlMap);
       } catch (e) {
-        console.warn('Error creating signed image URLs:', e);
+        console.warn('Notice parsing evidence URLs:', e);
       }
     }
 
@@ -281,26 +239,38 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
 
   // Realtime subscription setup
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    if (!token) return;
 
-    const channelName = `admin_incidents_${Math.random().toString(36).substring(2, 9)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'incident_reports'
-        },
-        () => {
+    // Use ws:// or wss:// depending on protocol
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
+    
+    let ws: WebSocket | null = null;
+    
+    const connectWs = () => {
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({ type: 'auth', token }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          // Just reuse sos_update logic for general realtime refreshes, 
+          // or add specific type if needed. We'll refresh on anything for now.
           fetchReports(false);
-        }
-      )
-      .subscribe();
+        } catch (e) {}
+      };
+    };
+
+    connectWs();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (ws) {
+        ws.close();
+      }
     };
   }, [fetchReports]);
 
@@ -351,27 +321,12 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
       updated_at: new Date().toISOString()
     } : null;
 
-    if (isSupabaseConfigured) {
-      try {
-        const { error } = await supabase.rpc('review_incident_report', {
-          p_report_id: reportId
-        });
-
-        if (error) {
-          // Fallback direct update
-          await supabase
-            .from('incident_reports')
-            .update({
-              status: 'under_review',
-              reviewed_at: new Date().toISOString(),
-              reviewed_by: user.id,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', reportId);
-        }
-      } catch (e) {
-        console.warn('Notice updating report status:', e);
-      }
+    try {
+      await apiFetch(`/incidents/${reportId}/review`, {
+        method: 'POST'
+      });
+    } catch (e) {
+      console.warn('Notice updating report status:', e);
     }
 
     if (updatedReport) {
@@ -408,30 +363,13 @@ export const AdminIncidentManager: React.FC<AdminIncidentManagerProps> = ({ user
       updated_at: new Date().toISOString()
     };
 
-    if (isSupabaseConfigured) {
-      try {
-        const rpcName = modalAction === 'resolve' ? 'resolve_incident_report' : 'reject_incident_report';
-
-        const { error } = await supabase.rpc(rpcName, {
-          p_report_id: targetReport.id,
-          p_admin_note: adminNoteInput.trim() || null
-        });
-
-        if (error) {
-          await supabase
-            .from('incident_reports')
-            .update({
-              status: newStatus,
-              admin_note: adminNoteInput.trim() || null,
-              reviewed_at: new Date().toISOString(),
-              reviewed_by: user.id,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', targetReport.id);
-        }
-      } catch (e) {
-        console.warn('Notice resolving/rejecting incident report:', e);
-      }
+    try {
+      await apiFetch(`/incidents/${targetReport.id}/${modalAction}`, {
+        method: 'POST',
+        body: JSON.stringify({ admin_note: adminNoteInput.trim() || null })
+      });
+    } catch (e) {
+      console.warn('Notice resolving/rejecting incident report:', e);
     }
 
     saveLocalIncidentReport(updatedReport);

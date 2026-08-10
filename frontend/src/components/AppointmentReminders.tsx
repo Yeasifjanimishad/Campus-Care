@@ -13,6 +13,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { Appointment, UserProfile } from '../types';
 
 interface AppointmentRemindersProps {
@@ -51,41 +52,9 @@ export const AppointmentReminders: React.FC<AppointmentRemindersProps> = ({
       // Query confirmed upcoming appointments
       let fetched: Appointment[] = [];
       try {
-        const { data, error: fetchErr } = await supabase
-          .from('appointments')
-          .select(`
-            *,
-            doctors (
-              id,
-              doctor_id,
-              full_name,
-              email,
-              department,
-              specialization,
-              designation,
-              profile_image_url
-            )
-          `)
-          .eq('student_id', currentUserId)
-          .in('status', ['confirmed', 'pending'])
-          .gte('appointment_date', todayStr)
-          .order('appointment_date', { ascending: true })
-          .order('start_time', { ascending: true })
-          .limit(5);
-
-        if (fetchErr) {
-          console.warn('[AppointmentReminders]: Joined fetch notice, running raw fallback:', fetchErr.message);
-          const { data: rawData } = await supabase
-            .from('appointments')
-            .select('*')
-            .eq('student_id', currentUserId)
-            .in('status', ['confirmed', 'pending'])
-            .gte('appointment_date', todayStr)
-            .order('appointment_date', { ascending: true })
-            .limit(5);
-          if (rawData) fetched = rawData as Appointment[];
-        } else if (data) {
-          fetched = data as Appointment[];
+        const response = await apiFetch('/appointment-reminders');
+        if (response && response.data) {
+          fetched = response.data as Appointment[];
         }
       } catch (err) {
         console.warn('[AppointmentReminders]: Notice fetching appointments:', err);

@@ -346,19 +346,22 @@ export const StudentAppointmentBooking: React.FC<StudentAppointmentBookingProps>
     let booked = false;
 
     try {
-      const { data: rpcData, error: rpcError } = await supabase.rpc('create_appointment', {
-        p_doctor_id: selectedDoctor.id,
-        p_appointment_date: appointmentDate,
-        p_start_time: selectedSlot.startTime,
-        p_end_time: selectedSlot.endTime,
-        p_reason: finalReason,
-        p_symptoms: symptoms.trim() || null,
-        p_student_note: studentNote.trim() || null,
+      const response = await apiFetch('/appointments', {
+        method: 'POST',
+        body: JSON.stringify({
+          doctor_id: selectedDoctor.id,
+          appointment_date: appointmentDate,
+          start_time: selectedSlot.startTime,
+          end_time: selectedSlot.endTime,
+          reason: finalReason,
+          symptoms: symptoms.trim() || null,
+          student_note: studentNote.trim() || null,
+        }),
       });
 
-      if (!rpcError && rpcData?.success) {
+      if (response && (response.id || response.appointment)) {
         booked = true;
-        const newApp = rpcData.appointment as Appointment;
+        const newApp = (response.appointment || response) as Appointment;
         newApp.doctors = selectedDoctor;
         try {
           const stored = localStorage.getItem('campuscare_local_appointments');
@@ -370,8 +373,6 @@ export const StudentAppointmentBooking: React.FC<StudentAppointmentBookingProps>
         setStep(4);
         if (onBookingSuccess) onBookingSuccess();
         return;
-      } else {
-        console.warn('[StudentAppointmentBooking] RPC notice:', rpcError?.message || rpcData?.message);
       }
     } catch (err: unknown) {
       console.warn('[StudentAppointmentBooking] Exception booking appointment:', err);

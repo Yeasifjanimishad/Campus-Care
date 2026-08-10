@@ -63,35 +63,26 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
 
   // 1. Fetch Doctor Profile, Health Records, and Completed Appointments
   const fetchData = useCallback(async () => {
-    if (!isSupabaseConfigured) {
-      setLoading(false);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
 
-      const authUser = (await supabase.auth.getUser()).data.user;
-      if (!authUser) {
-        setError('Authentication required as doctor.');
-        setLoading(false);
-        return;
-      }
-
       // Fetch Doctor Profile
       let docData: Doctor | null = null;
       try {
-        if (authUser?.id) {
-          const { data } = await supabase
-            .from('doctors')
-            .select('*')
-            .eq('user_id', authUser.id)
-            .maybeSingle();
-          if (data) docData = data as Doctor;
+        if (isSupabaseConfigured) {
+          const authUser = (await supabase.auth.getUser()).data.user;
+          if (authUser?.id) {
+            const { data } = await supabase
+              .from('doctors')
+              .select('*')
+              .eq('user_id', authUser.id)
+              .maybeSingle();
+            if (data) docData = data as Doctor;
+          }
         }
 
-        if (!docData && user.email) {
+        if (!docData && user.email && isSupabaseConfigured) {
           const { data } = await supabase
             .from('doctors')
             .select('*')
@@ -100,7 +91,7 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
           if (data) docData = data as Doctor;
         }
 
-        if (!docData && user.universityId) {
+        if (!docData && user.universityId && isSupabaseConfigured) {
           const { data } = await supabase
             .from('doctors')
             .select('*')
@@ -134,30 +125,9 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
       // Fetch Health Records created by this doctor
       let fetchedRecords: HealthRecord[] = [];
       try {
-        const { data: recordsData, error: recErr } = await supabase
-          .from('health_records')
-          .select(`
-            *,
-            doctor:doctors (*),
-            student:users (id, name, email, university_id, department, phone),
-            appointment:appointments (*)
-          `)
-          .eq('doctor_id', docData.id)
-          .order('created_at', { ascending: false });
-
-        if (recErr) {
-          console.warn('[DoctorHealthRecords] Joined query notice, running raw fallback:', recErr.message);
-          const { data: rawRecords, error: rawRecErr } = await supabase
-            .from('health_records')
-            .select('*')
-            .eq('doctor_id', docData.id)
-            .order('created_at', { ascending: false });
-
-          if (!rawRecErr && rawRecords) {
-            fetchedRecords = rawRecords as HealthRecord[];
-          }
-        } else if (recordsData) {
-          fetchedRecords = recordsData as HealthRecord[];
+        const response = await apiFetch('/health-records?limit=100');
+        if (response && response.data) {
+          fetchedRecords = response.data;
         }
       } catch (err) {
         console.warn('[DoctorHealthRecords] Health records fetch notice:', err);
@@ -184,30 +154,9 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
       // Fetch Doctor's Completed/Confirmed Appointments for student select menu
       let fetchedApps: Appointment[] = [];
       try {
-        const { data: appData, error: appErr } = await supabase
-          .from('appointments')
-          .select(`
-            *,
-            student:users (id, name, email, university_id, department, phone)
-          `)
-          .eq('doctor_id', docData.id)
-          .in('status', ['confirmed', 'completed'])
-          .order('appointment_date', { ascending: false });
-
-        if (appErr) {
-          console.warn('[DoctorHealthRecords] Appointments query notice, running raw fallback:', appErr.message);
-          const { data: rawApps } = await supabase
-            .from('appointments')
-            .select('*')
-            .eq('doctor_id', docData.id)
-            .in('status', ['confirmed', 'completed'])
-            .order('appointment_date', { ascending: false });
-
-          if (rawApps) {
-            fetchedApps = rawApps as Appointment[];
-          }
-        } else if (appData) {
-          fetchedApps = appData as Appointment[];
+        const response = await apiFetch('/appointments?limit=100');
+        if (response && response.data) {
+          fetchedApps = response.data.filter((a: any) => ['confirmed', 'completed'].includes(a.status));
         }
       } catch (err) {
         console.warn('[DoctorHealthRecords] Appointments fetch notice:', err);
@@ -331,24 +280,20 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
       setSaving(true);
 
       if (editingRecord) {
-        // UPDATE existing record via RPC
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('update_health_record', {
-          p_record_id: editingRecord.id,
-          p_diagnosis: diagnosis.trim(),
-          p_clinical_summary: clinicalSummary.trim() || null,
-          p_prescription: prescription.trim() || null,
-          p_treatment_plan: treatmentPlan.trim() || null,
-          p_follow_up_instructions: followUpInstructions.trim() || null,
-          p_doctor_note: doctorNote.trim() || null
+        // UPDATE existing record via backend API
+        const response = await apiFetch(`/health-records/${editingRecord.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            diagnosis: diagnosis.trim(),
+            clinical_summary: clinicalSummary.trim() || null,
+            prescription: prescription.trim() || null,
+            treatment_plan: treatmentPlan.trim() || null,
+            follow_up_instructions: followUpInstructions.trim() || null,
+            doctor_note: doctorNote.trim() || null
+          })
         });
 
-        if (rpcErr) {
-          setFormError(`Failed to update record: ${rpcErr.message}`);
-          setSaving(false);
-          return;
-        }
-
-        if (rpcData?.success) {
+        if (response && response.id) {
           setFormSuccess('Health record updated successfully.');
           setTimeout(() => {
             setIsModalOpen(false);
@@ -356,29 +301,26 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
             if (onRecordCreatedOrUpdated) onRecordCreatedOrUpdated();
           }, 800);
         } else {
-          setFormError(rpcData?.message || 'Failed to update record.');
+          setFormError('Failed to update record.');
         }
 
       } else {
-        // CREATE new record via RPC
-        const { data: rpcData, error: rpcErr } = await supabase.rpc('create_health_record', {
-          p_student_id: selectedStudentId,
-          p_diagnosis: diagnosis.trim(),
-          p_appointment_id: selectedAppointmentId || null,
-          p_clinical_summary: clinicalSummary.trim() || null,
-          p_prescription: prescription.trim() || null,
-          p_treatment_plan: treatmentPlan.trim() || null,
-          p_follow_up_instructions: followUpInstructions.trim() || null,
-          p_doctor_note: doctorNote.trim() || null
+        // CREATE new record via backend API
+        const response = await apiFetch('/health-records', {
+          method: 'POST',
+          body: JSON.stringify({
+            student_id: selectedStudentId,
+            appointment_id: selectedAppointmentId || null,
+            diagnosis: diagnosis.trim(),
+            clinical_summary: clinicalSummary.trim() || null,
+            prescription: prescription.trim() || null,
+            treatment_plan: treatmentPlan.trim() || null,
+            follow_up_instructions: followUpInstructions.trim() || null,
+            doctor_note: doctorNote.trim() || null
+          })
         });
 
-        if (rpcErr) {
-          setFormError(`Failed to create health record: ${rpcErr.message}`);
-          setSaving(false);
-          return;
-        }
-
-        if (rpcData?.success) {
+        if (response && response.id) {
           setFormSuccess('Health record created successfully!');
           setTimeout(() => {
             setIsModalOpen(false);
@@ -386,7 +328,7 @@ export const DoctorHealthRecords: React.FC<DoctorHealthRecordsProps> = ({
             if (onRecordCreatedOrUpdated) onRecordCreatedOrUpdated();
           }, 800);
         } else {
-          setFormError(rpcData?.message || 'Failed to create record.');
+          setFormError('Failed to create record.');
         }
       }
     } catch (err: any) {

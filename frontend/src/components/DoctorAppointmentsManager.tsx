@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { UserProfile, Appointment, Doctor } from '../types';
+import { apiFetch } from '../lib/api';
 import {
   CalendarDays,
   Clock,
@@ -123,31 +124,16 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
       // Query public.doctors linked to auth.uid() or email or universityId
       let docData: Doctor | null = null;
       try {
-        if (authUser?.id) {
-          const { data } = await supabase
-            .from('doctors')
-            .select('*')
-            .eq('user_id', authUser.id)
-            .maybeSingle();
-          if (data) docData = data as Doctor;
-        }
-
-        if (!docData && user.email) {
-          const { data } = await supabase
-            .from('doctors')
-            .select('*')
-            .ilike('email', user.email)
-            .maybeSingle();
-          if (data) docData = data as Doctor;
-        }
-
-        if (!docData && user.universityId) {
-          const { data } = await supabase
-            .from('doctors')
-            .select('*')
-            .eq('doctor_id', user.universityId)
-            .maybeSingle();
-          if (data) docData = data as Doctor;
+        const search = user.universityId || user.email;
+        if (search) {
+          const response = await apiFetch(`/doctors?search=${encodeURIComponent(search)}`);
+          if (response && response.data && response.data.length > 0) {
+            // Find the exact match if possible, or just use the first result
+            docData = response.data.find((d: Doctor) => 
+              d.doctor_id === user.universityId || 
+              d.email?.toLowerCase() === user.email?.toLowerCase()
+            ) || response.data[0];
+          }
         }
       } catch (e) {
         console.warn('[DoctorAppointmentsManager]: Doctor profile query notice:', e);
@@ -189,30 +175,9 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
       // Fetch appointments assigned ONLY to this doctor
       let fetchedApps: Appointment[] = [];
       try {
-        const { data: appData, error: appErr } = await supabase
-          .from('appointments')
-          .select(`
-            *,
-            student:users (id, name, email, university_id, department, phone)
-          `)
-          .eq('doctor_id', docData.id)
-          .order('appointment_date', { ascending: true })
-          .order('start_time', { ascending: true });
-
-        if (appErr) {
-          console.warn('[DoctorAppointmentsManager] Joined query notice, running raw fallback:', appErr.message);
-          const { data: rawApps } = await supabase
-            .from('appointments')
-            .select('*')
-            .eq('doctor_id', docData.id)
-            .order('appointment_date', { ascending: true })
-            .order('start_time', { ascending: true });
-
-          if (rawApps) {
-            fetchedApps = rawApps as Appointment[];
-          }
-        } else if (appData) {
-          fetchedApps = appData as Appointment[];
+        const data = await apiFetch(`/appointments?doctor_id=${docData.id}`);
+        if (data && data.data) {
+          fetchedApps = data.data as Appointment[];
         }
       } catch (err) {
         console.warn('[DoctorAppointmentsManager] Appointments fetch notice:', err);
@@ -339,22 +304,12 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
     setActionSubmitting(true);
     setError(null);
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('confirm_appointment', {
-          p_appointment_id: appId,
-        });
-
-        if (rpcErr || !data?.success) {
-          // Direct table update fallback
-          await supabase
-            .from('appointments')
-            .update({ status: 'confirmed', updated_at: new Date().toISOString() })
-            .eq('id', appId);
-        }
-      } catch (err: unknown) {
-        console.warn('Confirm RPC notice, fallback applied:', err);
-      }
+    try {
+      await apiFetch(`/appointments/${appId}/confirm`, {
+        method: 'POST'
+      });
+    } catch (err: unknown) {
+      console.warn('Confirm RPC notice, fallback applied:', err);
     }
 
     updateLocalAndStateAppointment(appId, { status: 'confirmed' });
@@ -387,43 +342,25 @@ export const DoctorAppointmentsManager: React.FC<DoctorAppointmentsManagerProps>
 
     try {
       if (actionModal.type === 'reject') {
-        if (isSupabaseConfigured) {
-          try {
-            const { data, error: rpcErr } = await supabase.rpc('reject_appointment', {
-              p_appointment_id: appId,
-              p_rejection_reason: noteOrReason,
-            });
-
-            if (rpcErr || !data?.success) {
-              await supabase
-                .from('appointments')
-                .update({ status: 'rejected', rejection_reason: noteOrReason, updated_at: new Date().toISOString() })
-                .eq('id', appId);
-            }
-          } catch (err: unknown) {
-            console.warn('Reject RPC notice, fallback applied:', err);
-          }
+        try {
+          await apiFetch(`/appointments/${appId}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ rejection_reason: noteOrReason })
+          });
+        } catch (err: unknown) {
+          console.warn('Reject RPC notice, fallback applied:', err);
         }
 
         updateLocalAndStateAppointment(appId, { status: 'rejected', rejection_reason: noteOrReason });
         handleCloseActionModal();
       } else if (actionModal.type === 'complete') {
-        if (isSupabaseConfigured) {
-          try {
-            const { data, error: rpcErr } = await supabase.rpc('complete_appointment', {
-              p_appointment_id: appId,
-              p_doctor_note: noteOrReason,
-            });
-
-            if (rpcErr || !data?.success) {
-              await supabase
-                .from('appointments')
-                .update({ status: 'completed', doctor_note: noteOrReason, updated_at: new Date().toISOString() })
-                .eq('id', appId);
-            }
-          } catch (err: unknown) {
-            console.warn('Complete RPC notice, fallback applied:', err);
-          }
+        try {
+          await apiFetch(`/appointments/${appId}/complete`, {
+            method: 'POST',
+            body: JSON.stringify({ doctor_note: noteOrReason })
+          });
+        } catch (err: unknown) {
+          console.warn('Complete RPC notice, fallback applied:', err);
         }
 
         updateLocalAndStateAppointment(appId, { status: 'completed', doctor_note: noteOrReason });

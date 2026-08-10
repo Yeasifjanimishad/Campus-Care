@@ -10,19 +10,35 @@ router.get('/', requireAuth, async (req, res, next) => {
   try {
     const authClient = createAuthClient(req.token!);
     
-    // We only want the current user's reminders
-    // Assuming RLS policy: sent_to_user_id = auth.uid()
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    // We want the current user's upcoming appointments
     const { data, error } = await authClient
-      .from('appointment_reminders')
-      .select('*')
-      .order('sent_at', { ascending: false })
-      .limit(50); // Get latest 50 reminders
+      .from('appointments')
+      .select(`
+        *,
+        doctors (
+          id,
+          doctor_id,
+          full_name,
+          email,
+          department,
+          specialization,
+          designation,
+          profile_image_url
+        )
+      `)
+      .in('status', ['confirmed', 'pending'])
+      .gte('appointment_date', todayStr)
+      .order('appointment_date', { ascending: true })
+      .order('start_time', { ascending: true })
+      .limit(5);
 
     if (error) {
       throw new AppError(500, 'Failed to fetch appointment reminders', error.message);
     }
 
-    res.json({ data });
+    res.json({ data: data || [] });
   } catch (err) {
     next(err);
   }

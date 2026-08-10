@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { SuperAdminStats, UserProfile } from '../types';
 import { SuperAdminUserManager } from './SuperAdminUserManager';
 import { SuperAdminAuditLog } from './SuperAdminAuditLog';
@@ -56,64 +57,9 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ user }
     }
 
     try {
-      const { data, error: rpcErr } = await supabase.rpc('get_super_admin_stats');
-
-      if (!rpcErr && data) {
+      const data = await apiFetch('/admin/stats');
+      if (data) {
         setStats(data as SuperAdminStats);
-        setLoadingStats(false);
-        return;
-      }
-
-      if (rpcErr) {
-        console.warn('[SuperAdminDashboard] RPC get_super_admin_stats notice:', rpcErr.message);
-      }
-
-      // Fallback to direct table count queries
-      const [
-        { count: totalUsers, error: err1 },
-        { count: studentCount },
-        { count: doctorCount },
-        { count: emergencyAdminCount },
-        { count: superAdminCount },
-        { count: doctorReqCount },
-        { count: activeSosCount },
-        { count: todayApptCount },
-        { count: todayIncCount },
-        { count: unreadNotifCount },
-        { count: broadcastsCount },
-        { count: healthRecordsCount }
-      ] = await Promise.all([
-        supabase.from('users').select('*', { count: 'exact', head: true }),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'student_faculty'),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'doctor'),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'emergency_admin'),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'super_admin'),
-        supabase.from('doctor_access_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('sos_alerts').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('appointments').select('*', { count: 'exact', head: true }),
-        supabase.from('incident_reports').select('*', { count: 'exact', head: true }),
-        supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('is_read', false),
-        supabase.from('broadcasts').select('*', { count: 'exact', head: true }),
-        supabase.from('health_records').select('*', { count: 'exact', head: true }),
-      ]);
-
-      if (err1) {
-        setStatsError('Error querying database statistics: ' + err1.message);
-      } else {
-        setStats({
-          total_users: totalUsers || 0,
-          students_faculty: studentCount || 0,
-          doctors: doctorCount || 0,
-          emergency_admins: emergencyAdminCount || 0,
-          super_admins: superAdminCount || 0,
-          pending_doctor_requests: doctorReqCount || 0,
-          active_sos_alerts: activeSosCount || 0,
-          today_appointments: todayApptCount || 0,
-          today_incidents: todayIncCount || 0,
-          unread_notifications: unreadNotifCount || 0,
-          total_broadcasts: broadcastsCount || 0,
-          total_health_records: healthRecordsCount || 0
-        });
       }
     } catch (err: any) {
       console.warn('[SuperAdminDashboard] Exception in fetchStats:', err?.message || err);

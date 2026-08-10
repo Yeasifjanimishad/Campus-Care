@@ -17,6 +17,7 @@ import {
   Plus
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { Appointment, AppointmentStatus, UserProfile } from '../types';
 import { AppointmentReminders } from './AppointmentReminders';
 
@@ -55,27 +56,13 @@ export const StudentAppointmentsList: React.FC<StudentAppointmentsListProps> = (
 
       // Fetch student's appointments with joined doctor details
       let dbAppointments: Appointment[] = [];
-      const { data, error: fetchErr } = await supabase
-        .from('appointments')
-        .select(`
-          *,
-          doctors (
-            id,
-            doctor_id,
-            full_name,
-            email,
-            department,
-            specialization,
-            designation,
-            profile_image_url
-          )
-        `)
-        .eq('student_id', currentUserId)
-        .order('appointment_date', { ascending: false })
-        .order('start_time', { ascending: false });
-
-      if (!fetchErr && data) {
-        dbAppointments = data as Appointment[];
+      try {
+        const data = await apiFetch('/appointments');
+        if (data && data.data) {
+          dbAppointments = data.data as Appointment[];
+        }
+      } catch (fetchErr) {
+        console.warn('Failed to fetch from backend', fetchErr);
       }
 
       // Merge local appointments from localStorage
@@ -116,19 +103,15 @@ export const StudentAppointmentsList: React.FC<StudentAppointmentsListProps> = (
     setCancelError(null);
 
     try {
-      // 1. Primary: Use RPC cancel_appointment
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('cancel_appointment', {
-        p_appointment_id: cancellingApp.id,
+      // 1. Primary: Use backend API cancel
+      const response = await apiFetch(`/appointments/${cancellingApp.id}/cancel`, {
+        method: 'POST'
       });
 
-      if (!rpcErr && rpcData?.success) {
+      if (response) {
         setCancellingApp(null);
         await fetchAppointments();
         return;
-      }
-
-      if (rpcErr) {
-        console.warn('[RPC cancel_appointment failed, fallback to direct update]:', rpcErr.message);
       }
 
       // 2. Direct Update Fallback

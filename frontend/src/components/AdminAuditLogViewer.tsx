@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { AdminAuditLog, UserProfile, UserRole } from '../types';
 import { 
   ShieldAlert, 
@@ -107,7 +107,7 @@ export const AdminAuditLogViewer: React.FC<AdminAuditLogViewerProps> = ({ user }
   const isEmergencyAdmin = user.role === 'emergency_admin';
   const isAdmin = isSuperAdmin || isEmergencyAdmin;
 
-  // 1. Fetch Audit Logs from Supabase
+  // 1. Fetch Audit Logs from Backend
   const fetchAuditLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -118,61 +118,13 @@ export const AdminAuditLogViewer: React.FC<AdminAuditLogViewerProps> = ({ user }
       return;
     }
 
-    if (!isSupabaseConfigured) {
-      setLogs(SAMPLE_AUDIT_LOGS);
-      setLoading(false);
-      return;
-    }
-
     try {
-      let logsData: AdminAuditLog[] = [];
-
-      const { data, error: fetchErr } = await supabase
-        .from('admin_audit_logs')
-        .select(`
-          id,
-          actor_id,
-          action,
-          target_user_id,
-          metadata,
-          created_at,
-          actor:users!actor_id(name, email, role),
-          target_user:users!target_user_id(name, email, role)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(200);
-
-      if (fetchErr) {
-        console.warn('[AdminAuditLogViewer] Joined query notice, running fallback:', fetchErr.message);
-        const { data: rawData, error: rawErr } = await supabase
-          .from('admin_audit_logs')
-          .select('id, actor_id, action, target_user_id, metadata, created_at')
-          .order('created_at', { ascending: false })
-          .limit(200);
-
-        if (!rawErr && rawData && rawData.length > 0) {
-          const userIds = Array.from(
-            new Set([...rawData.map((l: any) => l.actor_id), ...rawData.map((l: any) => l.target_user_id)].filter(Boolean))
-          );
-          let userMap: Record<string, any> = {};
-          if (userIds.length > 0) {
-            const { data: usersData } = await supabase
-              .from('users')
-              .select('id, name, email, role')
-              .in('id', userIds);
-            if (usersData) userMap = Object.fromEntries(usersData.map((u: any) => [u.id, u]));
-          }
-          logsData = rawData.map((l: any) => ({
-            ...l,
-            actor: userMap[l.actor_id] || null,
-            target_user: userMap[l.target_user_id] || null
-          }));
-        }
-      } else if (data && data.length > 0) {
-        logsData = data as AdminAuditLog[];
+      const response = await apiFetch('/admin/audit-logs?limit=200');
+      if (response && response.data && response.data.length > 0) {
+        setLogs(response.data);
+      } else {
+        setLogs(SAMPLE_AUDIT_LOGS);
       }
-
-      setLogs(logsData.length > 0 ? logsData : SAMPLE_AUDIT_LOGS);
     } catch (err: any) {
       console.warn('[AdminAuditLogViewer]: Using sample fallback logs:', err);
       setLogs(SAMPLE_AUDIT_LOGS);
@@ -185,23 +137,54 @@ export const AdminAuditLogViewer: React.FC<AdminAuditLogViewerProps> = ({ user }
   useEffect(() => {
     fetchAuditLogs();
 
-    // Supabase Realtime Subscription for live audit log stream
-    if (isSupabaseConfigured && isAdmin) {
-      const channel = supabase
-        .channel('admin-audit-logs-realtime')
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'admin_audit_logs' },
-          () => {
+    if (!isAdmin) return;
+
+    let ws: WebSocket | null = null;
+    let isMounted = true;
+    let reconnectTimeout: any;
+
+    const connectWebSocket = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        if (!isMounted) return;
+        const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+        if (token) {
+          ws?.send(JSON.stringify({ type: 'auth', token }));
+        }
+      };
+
+      ws.onmessage = (event) => {
+        if (!isMounted) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'audit_log_update') {
             fetchAuditLogs();
           }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
+        } catch (e) {
+          console.error('WS Error parsing message:', e);
+        }
       };
-    }
+
+      ws.onclose = () => {
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connectWebSocket, 5000);
+        }
+      };
+    };
+
+    connectWebSocket();
+
+    return () => {
+      isMounted = false;
+      clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.close();
+      }
+    };
   }, [fetchAuditLogs, isAdmin]);
 
   const handleRefresh = () => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   ShieldAlert, 
   MapPin, 
@@ -9,11 +9,10 @@ import {
   Loader2, 
   Radio, 
   Info,
-  Navigation,
   Send,
   BellOff
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { UserProfile, SosAlert } from '../types';
 
 interface StudentSosManagerProps {
@@ -66,30 +65,23 @@ export const StudentSosManager: React.FC<StudentSosManagerProps> = ({ user }) =>
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  const wsRef = useRef<WebSocket | null>(null);
+
   // Fetch active SOS alert for the logged-in student
   const fetchActiveAlert = useCallback(async () => {
     let foundAlert: SosAlert | null = null;
     const studentId = user.id || 'std-101';
 
-    if (isSupabaseConfigured) {
-      try {
-        setLoading(true);
-        setErrorMsg(null);
+    try {
+      setLoading(true);
+      setErrorMsg(null);
 
-        const { data, error } = await supabase
-          .from('sos_alerts')
-          .select('*')
-          .eq('student_id', studentId)
-          .in('status', ['active', 'acknowledged'])
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        if (!error && data && data.length > 0) {
-          foundAlert = data[0] as SosAlert;
-        }
-      } catch (err: any) {
-        console.warn('[StudentSosManager] Exception querying SOS alerts:', err?.message || err);
+      const response = await apiFetch('/sos?status=active,acknowledged&limit=1');
+      if (response && response.data && response.data.length > 0) {
+        foundAlert = response.data[0] as SosAlert;
       }
+    } catch (err: any) {
+      console.warn('[StudentSosManager] Exception querying SOS alerts:', err?.message || err);
     }
 
     try {
@@ -137,28 +129,41 @@ export const StudentSosManager: React.FC<StudentSosManagerProps> = ({ user }) =>
     };
   }, [fetchActiveAlert]);
 
-  // Set up Supabase Realtime subscription for student's SOS alerts
+  // Set up WebSocket connection for real-time updates
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    if (!token) return;
 
-    const channelName = `student_sos_${Math.random().toString(36).substring(2, 9)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'sos_alerts',
-        },
-        () => {
-          fetchActiveAlert();
-        }
-      )
-      .subscribe();
+    // Use ws:// or wss:// depending on protocol
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // For AI Studio proxy, use same host
+    const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
+    
+    const connectWs = () => {
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', token }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'sos_update') {
+            fetchActiveAlert();
+          }
+        } catch (e) {}
+      };
+
+      wsRef.current = ws;
+    };
+
+    connectWs();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
   }, [fetchActiveAlert]);
 
@@ -186,63 +191,33 @@ export const StudentSosManager: React.FC<StudentSosManagerProps> = ({ user }) =>
         phone: user.phone || '+880 1812-345678',
       };
 
-      if (isSupabaseConfigured) {
-        try {
-          const { data, error } = await supabase.rpc('create_sos_alert', {
-            p_latitude: 23.8759,
-            p_longitude: 90.3795,
-            p_accuracy: null,
-            p_emergency_type: emergencyType,
-            p_message: finalMessage,
-          });
+      try {
+        const response = await apiFetch('/sos', {
+          method: 'POST',
+          body: JSON.stringify({
+            latitude: 23.8759,
+            longitude: 90.3795,
+            accuracy: null,
+            emergency_type: emergencyType,
+            message: finalMessage,
+          }),
+        });
 
-          if (!error && data && data.success) {
-            if (data.is_duplicate) {
-              setWarningMsg(data.message || 'An active SOS emergency is already open for your account.');
-            } else {
-              setSuccessMsg('Emergency SOS alert dispatched to Campus Admin & Security team!');
-            }
-            if (data.alert) {
-              createdAlert = {
-                ...(data.alert as SosAlert),
-                student: ((data.alert as any).student || studentInfo)
-              };
-            }
-          } else if (error) {
-            console.warn('[StudentSosManager] Supabase RPC notice:', error.message);
+        if (response) {
+          if (response.is_duplicate) {
+            setWarningMsg(response.message || 'An active SOS emergency is already open for your account.');
+          } else {
+            setSuccessMsg('Emergency SOS alert dispatched to Campus Admin & Security team!');
           }
-        } catch (err: any) {
-          console.warn('[StudentSosManager] Network notice during SOS dispatch:', err);
-        }
-
-        // Fallback direct insert if RPC returned no alert object
-        if (!createdAlert) {
-          try {
-            const { data: directData, error: directErr } = await supabase
-              .from('sos_alerts')
-              .insert({
-                student_id: user.id || 'std-101',
-                emergency_type: emergencyType,
-                status: 'active',
-                latitude: 23.8759,
-                longitude: 90.3795,
-                accuracy: null,
-                message: finalMessage
-              })
-              .select('*')
-              .single();
-
-            if (!directErr && directData) {
-              createdAlert = {
-                ...(directData as SosAlert),
-                student: studentInfo
-              };
-              setSuccessMsg('Emergency SOS alert dispatched to Campus Admin & Security team!');
-            }
-          } catch (e) {
-            console.warn('[StudentSosManager] Direct insert notice:', e);
+          if (response.alert) {
+            createdAlert = {
+              ...(response.alert as SosAlert),
+              student: (response.alert.student || studentInfo)
+            };
           }
         }
+      } catch (err: any) {
+        console.warn('[StudentSosManager] Network notice during SOS dispatch:', err);
       }
 
       if (!createdAlert) {
@@ -281,15 +256,9 @@ export const StudentSosManager: React.FC<StudentSosManagerProps> = ({ user }) =>
     setErrorMsg(null);
 
     try {
-      if (isSupabaseConfigured) {
-        try {
-          await supabase.rpc('cancel_sos_alert', {
-            p_alert_id: activeAlert.id,
-          });
-        } catch (err) {
-          console.warn('[StudentSosManager] Notice cancelling SOS via RPC:', err);
-        }
-      }
+      await apiFetch(`/sos/${activeAlert.id}/cancel`, {
+        method: 'POST'
+      });
     } catch (err: any) {
       console.warn('[StudentSosManager] Cancel exception:', err);
     } finally {

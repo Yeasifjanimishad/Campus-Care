@@ -18,8 +18,8 @@ import {
   ShieldCheck,
   CheckCircle2
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { UserProfile, HealthRecord } from '../types';
+import { apiFetch } from '../lib/api';
 
 interface StudentHealthRecordsProps {
   user: UserProfile;
@@ -39,95 +39,19 @@ export const StudentHealthRecords: React.FC<StudentHealthRecordsProps> = ({
   const [selectedRecord, setSelectedRecord] = useState<HealthRecord | null>(null);
 
   const fetchHealthRecords = useCallback(async () => {
-    if (!isSupabaseConfigured) {
-      setLoading(false);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
 
-      const authUser = (await supabase.auth.getUser()).data.user;
-      if (!authUser) {
-        setError('Authentication required to view health records.');
-        setLoading(false);
-        return;
-      }
-
       let fetchedRecords: HealthRecord[] = [];
 
-      // Fetch health records with joined doctor and appointment info
-      const { data, error: fetchErr } = await supabase
-        .from('health_records')
-        .select(`
-          *,
-          doctor:doctors!doctor_id (
-            id,
-            doctor_id,
-            full_name,
-            email,
-            department,
-            specialization,
-            designation,
-            profile_image_url
-          ),
-          appointment:appointments!appointment_id (
-            id,
-            appointment_date,
-            start_time,
-            end_time,
-            reason
-          )
-        `)
-        .eq('student_id', authUser.id)
-        .order('created_at', { ascending: false });
-
-      if (fetchErr) {
-        console.warn('[StudentHealthRecords] Joined query notice, running fallback:', fetchErr.message);
-        const { data: rawData, error: rawErr } = await supabase
-          .from('health_records')
-          .select('*')
-          .eq('student_id', authUser.id)
-          .order('created_at', { ascending: false });
-
-        if (rawErr) {
-          console.error('Error loading health records:', rawErr);
-          setError(`Failed to fetch health records: ${rawErr.message}`);
-          return;
+      try {
+        const response = await apiFetch('/health-records');
+        if (response && response.data) {
+          fetchedRecords = response.data;
         }
-
-        if (rawData && rawData.length > 0) {
-          const docIds = Array.from(new Set(rawData.map((r: any) => r.doctor_id).filter(Boolean)));
-          const apptIds = Array.from(new Set(rawData.map((r: any) => r.appointment_id).filter(Boolean)));
-
-          let docMap: Record<string, any> = {};
-          let apptMap: Record<string, any> = {};
-
-          if (docIds.length > 0) {
-            const { data: docsData } = await supabase
-              .from('doctors')
-              .select('id, doctor_id, full_name, email, department, specialization, designation, profile_image_url')
-              .in('id', docIds);
-            if (docsData) docMap = Object.fromEntries(docsData.map((d: any) => [d.id, d]));
-          }
-
-          if (apptIds.length > 0) {
-            const { data: apptsData } = await supabase
-              .from('appointments')
-              .select('id, appointment_date, start_time, end_time, reason')
-              .in('id', apptIds);
-            if (apptsData) apptMap = Object.fromEntries(apptsData.map((a: any) => [a.id, a]));
-          }
-
-          fetchedRecords = rawData.map((r: any) => ({
-            ...r,
-            doctor: docMap[r.doctor_id] || null,
-            appointment: apptMap[r.appointment_id] || null
-          }));
-        }
-      } else if (data) {
-        fetchedRecords = data as HealthRecord[];
+      } catch (err: any) {
+        console.warn('Notice loading health records from backend:', err?.message || err);
       }
 
       setRecords(fetchedRecords);

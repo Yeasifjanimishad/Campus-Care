@@ -15,7 +15,7 @@ import {
   CheckCircle2, 
   Inbox
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { NotificationItem, UserProfile, BroadcastCategory, BroadcastPriority } from '../types';
 
 interface StudentNotificationsViewProps {
@@ -71,26 +71,9 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
       setLoading(true);
       setError(null);
 
-      if (isSupabaseConfigured) {
-        const authUser = (await supabase.auth.getUser()).data?.user;
-        if (authUser) {
-          const { data, error: fetchErr } = await supabase
-            .from('notifications')
-            .select('*')
-            .eq('user_id', authUser.id)
-            .order('created_at', { ascending: false });
-
-          if (fetchErr) {
-            console.warn('[Notifications View]: Query notice, loading fallback:', fetchErr.message);
-            setNotifications(SAMPLE_NOTIFICATIONS);
-          } else if (data && data.length > 0) {
-            setNotifications(data as NotificationItem[]);
-          } else {
-            setNotifications(SAMPLE_NOTIFICATIONS);
-          }
-        } else {
-          setNotifications(SAMPLE_NOTIFICATIONS);
-        }
+      const response = await apiFetch('/notifications?limit=100');
+      if (response && response.data) {
+        setNotifications(response.data);
       } else {
         setNotifications(SAMPLE_NOTIFICATIONS);
       }
@@ -105,47 +88,50 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
   useEffect(() => {
     fetchNotifications();
 
-    if (!isSupabaseConfigured) return;
-
-    let channel: any = null;
+    let ws: WebSocket | null = null;
     let isMounted = true;
+    let reconnectTimeout: any;
 
-    const setupRealtime = async () => {
-      const authUser = (await supabase.auth.getUser()).data.user;
-      if (!authUser || !isMounted) return;
+    const connectWebSocket = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        if (!isMounted) return;
+        const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+        if (token) {
+          ws?.send(JSON.stringify({ type: 'auth', token }));
+        }
+      };
 
-      const channelName = `view-notifications-${authUser.id}-${Math.random().toString(36).substring(2, 9)}`;
-      const newChannel = supabase
-        .channel(channelName)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'notifications',
-            filter: `user_id=eq.${authUser.id}`,
-          },
-          () => {
-            if (isMounted) {
-              fetchNotifications();
-            }
+      ws.onmessage = (event) => {
+        if (!isMounted) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'notification_update') {
+            fetchNotifications();
           }
-        )
-        .subscribe();
+        } catch (e) {
+          console.error('WS Error parsing message:', e);
+        }
+      };
 
-      if (isMounted) {
-        channel = newChannel;
-      } else {
-        supabase.removeChannel(newChannel);
-      }
+      ws.onclose = () => {
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connectWebSocket, 5000);
+        }
+      };
     };
 
-    setupRealtime();
+    connectWebSocket();
 
     return () => {
       isMounted = false;
-      if (channel) {
-        supabase.removeChannel(channel);
+      clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.close();
       }
     };
   }, [fetchNotifications]);
@@ -153,7 +139,7 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
   const handleMarkAsRead = async (id: string) => {
     try {
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true, read_at: new Date().toISOString() } : n));
-      await supabase.rpc('mark_notification_read', { p_notification_id: id });
+      await apiFetch(`/notifications/${id}/read`, { method: 'POST' });
     } catch (err) {
       console.error('Error marking read:', err);
     }
@@ -162,7 +148,7 @@ export const StudentNotificationsView: React.FC<StudentNotificationsViewProps> =
   const handleMarkAllRead = async () => {
     try {
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true, read_at: new Date().toISOString() })));
-      await supabase.rpc('mark_all_notifications_read');
+      await apiFetch('/notifications/read-all', { method: 'POST' });
     } catch (err) {
       console.error('Error marking all read:', err);
     }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { UserProfile, UserRole, ManagedUser, Doctor } from '../types';
 import { 
   Users, 
@@ -193,20 +194,9 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ user }) => {
 
     try {
       let baseList: ManagedUser[] = [];
-      if (isSupabaseConfigured) {
-        const { data, error: fetchErr } = await supabase
-          .from('users')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (fetchErr) {
-          console.warn('[AdminUserManager]: Supabase fetch error, using sample directory:', fetchErr.message);
-          baseList = SAMPLE_USERS;
-        } else if (data && data.length > 0) {
-          baseList = data as ManagedUser[];
-        } else {
-          baseList = SAMPLE_USERS;
-        }
+      const response = await apiFetch('/admin/users?limit=100');
+      if (response && response.data) {
+        baseList = response.data;
       } else {
         baseList = SAMPLE_USERS;
       }
@@ -219,7 +209,7 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ user }) => {
 
       setUsersList(mergedList);
     } catch (err: any) {
-      console.warn('[AdminUserManager Error]: Failed to fetch users from Supabase, loading fallback user list:', err);
+      console.warn('[AdminUserManager Error]: Failed to fetch users from backend, loading fallback user list:', err);
       const mergedList = SAMPLE_USERS.map(u => {
         const override = localOverrides[u.id];
         return override ? { ...u, ...override } : u;
@@ -301,30 +291,13 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ user }) => {
     setUpdatingRole(true);
     setRoleError(null);
 
-    let updated = false;
-
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('update_user_role', {
-          p_user_id: roleModalUser.id,
-          p_new_role: selectedRole
-        });
-
-        if (!rpcErr && data && data.success !== false) {
-          updated = true;
-        } else {
-          // Direct table update fallback
-          const { error: directErr } = await supabase
-            .from('users')
-            .update({ role: selectedRole })
-            .eq('id', roleModalUser.id);
-          if (!directErr) {
-            updated = true;
-          }
-        }
-      } catch (err: any) {
-        console.warn('[Role Update Notice]: Falling back to local state:', err);
-      }
+    try {
+      await apiFetch(`/admin/users/${roleModalUser.id}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: selectedRole })
+      });
+    } catch (err: any) {
+      console.warn('[Role Update Notice]: Falling back to local state:', err);
     }
 
     if (selectedRole === 'doctor') {
@@ -406,30 +379,13 @@ export const AdminUserManager: React.FC<AdminUserManagerProps> = ({ user }) => {
     setUpdatingStatus(true);
     setStatusError(null);
 
-    let updated = false;
-
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('update_user_status', {
-          p_user_id: statusModalUser.id,
-          p_status: selectedStatus
-        });
-
-        if (!rpcErr && data && data.success !== false) {
-          updated = true;
-        } else {
-          // Direct table update fallback
-          const { error: directErr } = await supabase
-            .from('users')
-            .update({ status: selectedStatus })
-            .eq('id', statusModalUser.id);
-          if (!directErr) {
-            updated = true;
-          }
-        }
-      } catch (err: any) {
-        console.warn('[Status Update Notice]: Falling back to local state:', err);
-      }
+    try {
+      await apiFetch(`/admin/users/${statusModalUser.id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: selectedStatus })
+      });
+    } catch (err: any) {
+      console.warn('[Status Update Notice]: Falling back to local state:', err);
     }
 
     // Always update local storage & state so admin UI updates immediately

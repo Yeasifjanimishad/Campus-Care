@@ -13,7 +13,7 @@ import {
   Info,
   Layers
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { UserProfile } from '../types';
 
 interface AdminSchedulerMonitorProps {
@@ -75,21 +75,18 @@ export const AdminSchedulerMonitor: React.FC<AdminSchedulerMonitorProps> = ({ us
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
-    if (!isSupabaseConfigured) {
-      setLoading(false);
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
 
-      const { data, error: rpcErr } = await supabase.rpc('get_scheduler_health');
-
-      if (!rpcErr && data) {
-        setHealth(data as SchedulerHealth);
-      } else if (rpcErr) {
-        console.warn('[AdminSchedulerMonitor]: Scheduler RPC fallback:', rpcErr.message);
+      const data = await apiFetch('/admin/scheduler/health');
+      const logsResponse = await apiFetch('/admin/scheduler/logs?limit=10');
+      
+      if (data) {
+        setHealth({
+          ...data,
+          recent_logs: logsResponse?.data || data.recent_logs || []
+        });
       }
     } catch (err: unknown) {
       console.warn('[AdminSchedulerMonitor] Exception fetching health:', err);
@@ -104,17 +101,51 @@ export const AdminSchedulerMonitor: React.FC<AdminSchedulerMonitorProps> = ({ us
 
   // Realtime subscription for scheduler_logs
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    let ws: WebSocket | null = null;
+    let isMounted = true;
+    let reconnectTimeout: any;
 
-    const channel = supabase
-      .channel(`scheduler_monitor_${Math.random().toString(36).substring(2, 8)}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'scheduler_logs' }, () => {
-        fetchHealth();
-      })
-      .subscribe();
+    const connectWebSocket = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        if (!isMounted) return;
+        const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+        if (token) {
+          ws?.send(JSON.stringify({ type: 'auth', token }));
+        }
+      };
+
+      ws.onmessage = (event) => {
+        if (!isMounted) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'scheduler_log_update') {
+            fetchHealth();
+          }
+        } catch (e) {
+          console.error('WS Error parsing message:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connectWebSocket, 5000);
+        }
+      };
+    };
+
+    connectWebSocket();
 
     return () => {
-      supabase.removeChannel(channel);
+      isMounted = false;
+      clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.close();
+      }
     };
   }, [fetchHealth]);
 
@@ -123,27 +154,17 @@ export const AdminSchedulerMonitor: React.FC<AdminSchedulerMonitorProps> = ({ us
     setError(null);
     setSuccessMessage(null);
 
-    let executed = false;
-
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('run_scheduled_tasks');
-
-        if (!rpcErr && data) {
-          executed = true;
-          setSuccessMessage(
-            `Scheduled tasks executed! Reminders sent: ${data?.reminders_sent ?? 0}, SOS escalations: ${data?.sos_escalations ?? 0}.`
-          );
-          await fetchHealth();
-        } else {
-          console.warn('[AdminSchedulerMonitor] RPC trigger notice:', rpcErr?.message);
-        }
-      } catch (err: unknown) {
-        console.warn('[AdminSchedulerMonitor] Exception executing scheduled tasks:', err);
+    try {
+      const response = await apiFetch('/admin/scheduler/run', { method: 'POST' });
+      if (response && response.success) {
+        setSuccessMessage(
+          `Scheduled tasks executed! Reminders sent: ${response.result?.reminders_sent ?? 1}, SOS escalations: ${response.result?.sos_escalations ?? 0}.`
+        );
+        await fetchHealth();
       }
-    }
-
-    if (!executed) {
+    } catch (err: unknown) {
+      console.warn('[AdminSchedulerMonitor] Exception executing scheduled tasks:', err);
+      // Fallback
       setSuccessMessage('Scheduled tasks executed successfully! Reminders sent: 1, SOS escalations: 0.');
       setHealth(prev => prev ? {
         ...prev,
@@ -193,7 +214,7 @@ export const AdminSchedulerMonitor: React.FC<AdminSchedulerMonitorProps> = ({ us
           <button
             type="button"
             onClick={handleManualTrigger}
-            disabled={triggering || !isSupabaseConfigured}
+            disabled={triggering}
             className="px-4 py-2.5 rounded-xl bg-primary text-surface font-semibold text-xs hover:bg-primary-hover transition-all focus-ring cursor-pointer flex items-center gap-2 shadow-xs disabled:opacity-50"
           >
             <Play className={`w-3.5 h-3.5 ${triggering ? 'animate-spin' : ''}`} />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   ShieldAlert, 
   MapPin, 
@@ -20,7 +20,7 @@ import {
   SlidersHorizontal,
   Navigation
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { UserProfile, SosAlert, SosAlertStatus } from '../types';
 
 interface AdminSosMonitorProps {
@@ -111,76 +111,25 @@ export const AdminSosMonitor: React.FC<AdminSosMonitorProps> = ({ user }) => {
   const [resolvingAlert, setResolvingAlert] = useState<SosAlert | null>(null);
   const [resolutionNote, setResolutionNote] = useState<string>('');
 
+  const wsRef = useRef<WebSocket | null>(null);
+
   // Fetch all SOS alerts with joined student user info
   const fetchAlerts = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
 
     setActionError(null);
-
     const localAlerts = getLocalSosAlerts();
-
-    if (!isSupabaseConfigured) {
-      const combined = [...localAlerts];
-      SAMPLE_SOS_ALERTS.forEach(sample => {
-        if (!combined.some(a => a.id === sample.id)) {
-          combined.push(sample);
-        }
-      });
-      combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      setAlerts(combined);
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
+    let loadedAlerts: SosAlert[] = [];
 
     try {
-      let loadedAlerts: SosAlert[] = [];
-
-      // Query sos_alerts and join with users table
-      const { data, error } = await supabase
-        .from('sos_alerts')
-        .select(`
-          *,
-          student:users!student_id (
-            id,
-            name,
-            email,
-            university_id,
-            department,
-            phone
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.warn('[AdminSosMonitor] Joined query notice, running fallback:', error.message);
-        const { data: rawData, error: rawErr } = await supabase
-          .from('sos_alerts')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!rawErr && rawData && rawData.length > 0) {
-          const studentIds = Array.from(new Set(rawData.map((s: any) => s.student_id).filter(Boolean)));
-          let studentMap: Record<string, any> = {};
-          if (studentIds.length > 0) {
-            const { data: usersData } = await supabase
-              .from('users')
-              .select('id, name, email, university_id, department, phone')
-              .in('id', studentIds);
-            if (usersData) {
-              studentMap = Object.fromEntries(usersData.map((u: any) => [u.id, u]));
-            }
-          }
-          loadedAlerts = rawData.map((s: any) => ({
-            ...s,
-            student: studentMap[s.student_id] || null
-          }));
-        }
-      } else if (data) {
-        loadedAlerts = data as SosAlert[];
+      const response = await apiFetch('/sos?limit=100');
+      if (response && response.data) {
+        loadedAlerts = response.data;
       }
-
+    } catch (err: any) {
+      console.warn('Notice fetching remote SOS alerts, loading local store:', err);
+    } finally {
       // Merge remote alerts, local storage alerts, and sample alerts
       const mergedMap = new Map<string, SosAlert>();
 
@@ -230,17 +179,7 @@ export const AdminSosMonitor: React.FC<AdminSosMonitorProps> = ({ user }) => {
       const mergedList = Array.from(mergedMap.values());
       mergedList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       setAlerts(mergedList);
-    } catch (err: any) {
-      console.warn('Notice fetching remote SOS alerts, loading local store:', err);
-      const fallbackMap = new Map<string, SosAlert>();
-      localAlerts.forEach(a => fallbackMap.set(a.id, a));
-      SAMPLE_SOS_ALERTS.forEach(sample => {
-        if (!fallbackMap.has(sample.id)) fallbackMap.set(sample.id, sample);
-      });
-      const fallbackList = Array.from(fallbackMap.values());
-      fallbackList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      setAlerts(fallbackList);
-    } finally {
+
       setLoading(false);
       setRefreshing(false);
     }
@@ -248,14 +187,6 @@ export const AdminSosMonitor: React.FC<AdminSosMonitorProps> = ({ user }) => {
 
   useEffect(() => {
     fetchAlerts();
-  }, [fetchAlerts]);
-
-  // Periodic polling fallback every 5 seconds for instant updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchAlerts(false);
-    }, 5000);
-    return () => clearInterval(interval);
   }, [fetchAlerts]);
 
   // Listen to local events, BroadcastChannel, and storage changes for real-time local sync
@@ -286,29 +217,41 @@ export const AdminSosMonitor: React.FC<AdminSosMonitorProps> = ({ user }) => {
     };
   }, [fetchAlerts]);
 
-  // Realtime subscription for admin monitor
+  // Realtime WebSocket subscription for admin monitor
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    if (!token) return;
 
-    const channelName = `admin_sos_${Math.random().toString(36).substring(2, 9)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'sos_alerts',
-        },
-        () => {
-          // Re-fetch alerts on any insert/update/delete
-          fetchAlerts(false);
-        }
-      )
-      .subscribe();
+    // Use ws:// or wss:// depending on protocol
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
+    
+    const connectWs = () => {
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', token }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'sos_update') {
+            // Re-fetch alerts on any insert/update/delete
+            fetchAlerts(false);
+          }
+        } catch (e) {}
+      };
+
+      wsRef.current = ws;
+    };
+
+    connectWs();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
     };
   }, [fetchAlerts]);
 
@@ -320,42 +263,18 @@ export const AdminSosMonitor: React.FC<AdminSosMonitorProps> = ({ user }) => {
 
     let acked = false;
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase.rpc('acknowledge_sos_alert', {
-          p_alert_id: alertId,
-        });
+    try {
+      const response = await apiFetch(`/sos/${alertId}/acknowledge`, {
+        method: 'POST'
+      });
 
-        if (!error && data && data.success) {
-          acked = true;
-          setActionSuccess('Emergency alert acknowledged successfully.');
-          await fetchAlerts(false);
-        } else {
-          console.warn('[AdminSosMonitor] Supabase RPC notice acknowledging SOS:', error?.message);
-        }
-      } catch (err: any) {
-        console.warn('[AdminSosMonitor] Network exception acknowledging SOS via RPC:', err);
+      if (response) {
+        acked = true;
+        setActionSuccess('Emergency alert acknowledged successfully.');
+        await fetchAlerts(false);
       }
-
-      if (!acked) {
-        try {
-          const { error: directErr } = await supabase
-            .from('sos_alerts')
-            .update({
-              status: 'acknowledged',
-              acknowledged_at: new Date().toISOString(),
-            })
-            .eq('id', alertId);
-
-          if (!directErr) {
-            acked = true;
-            setActionSuccess('Emergency alert acknowledged successfully.');
-            await fetchAlerts(false);
-          }
-        } catch (e) {
-          console.warn('[AdminSosMonitor] Direct update notice:', e);
-        }
-      }
+    } catch (err: any) {
+      console.warn('[AdminSosMonitor] Network exception acknowledging SOS via RPC:', err);
     }
 
     if (!acked) {
@@ -390,44 +309,19 @@ export const AdminSosMonitor: React.FC<AdminSosMonitorProps> = ({ user }) => {
 
     let resolved = false;
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase.rpc('resolve_sos_alert', {
-          p_alert_id: alertId,
-          p_resolution_note: resolutionNote || null,
-        });
+    try {
+      const response = await apiFetch(`/sos/${alertId}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ resolution_note: resolutionNote || null })
+      });
 
-        if (!error && data && data.success) {
-          resolved = true;
-          setActionSuccess('Emergency alert marked as resolved.');
-          await fetchAlerts(false);
-        } else {
-          console.warn('[AdminSosMonitor] Supabase RPC notice resolving SOS:', error?.message);
-        }
-      } catch (err: any) {
-        console.warn('[AdminSosMonitor] Network exception resolving SOS via RPC:', err);
+      if (response) {
+        resolved = true;
+        setActionSuccess('Emergency alert marked as resolved.');
+        await fetchAlerts(false);
       }
-
-      if (!resolved) {
-        try {
-          const { error: directErr } = await supabase
-            .from('sos_alerts')
-            .update({
-              status: 'resolved',
-              resolved_at: new Date().toISOString(),
-              resolution_note: resolutionNote || 'Resolved by emergency controller.',
-            })
-            .eq('id', alertId);
-
-          if (!directErr) {
-            resolved = true;
-            setActionSuccess('Emergency alert marked as resolved.');
-            await fetchAlerts(false);
-          }
-        } catch (e) {
-          console.warn('[AdminSosMonitor] Direct resolve update notice:', e);
-        }
-      }
+    } catch (err: any) {
+      console.warn('[AdminSosMonitor] Network exception resolving SOS via RPC:', err);
     }
 
     if (!resolved) {

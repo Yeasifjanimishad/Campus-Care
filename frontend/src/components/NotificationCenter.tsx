@@ -13,7 +13,7 @@ import {
   Sparkles,
   Info
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { NotificationItem, UserProfile, BroadcastCategory, BroadcastPriority } from '../types';
 
 interface NotificationCenterProps {
@@ -58,27 +58,15 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
-      if (isSupabaseConfigured) {
-        const authUser = (await supabase.auth.getUser()).data?.user;
-        if (authUser) {
-          const { data, error } = await supabase
-            .from('notifications')
-            .select('*')
-            .eq('user_id', authUser.id)
-            .order('created_at', { ascending: false })
-            .limit(20);
-
-          if (!error && data && data.length > 0) {
-            setNotifications(data as NotificationItem[]);
-            const count = (data as NotificationItem[]).filter(n => !n.is_read).length;
-            setUnreadCount(count);
-            return;
-          }
-        }
+      const response = await apiFetch('/notifications?limit=20');
+      if (response && response.data) {
+        setNotifications(response.data);
       }
-
-      setNotifications(SAMPLE_NOTIFICATIONS);
-      setUnreadCount(SAMPLE_NOTIFICATIONS.filter(n => !n.is_read).length);
+      
+      const countResponse = await apiFetch('/notifications/unread-count');
+      if (countResponse) {
+        setUnreadCount(countResponse.count || 0);
+      }
     } catch (err) {
       console.warn('[NotificationCenter] Notice loading fallback notifications:', err);
       setNotifications(SAMPLE_NOTIFICATIONS);
@@ -94,59 +82,64 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
   // Realtime subscription for incoming notifications
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
-
-    let channel: any = null;
+    let ws: WebSocket | null = null;
     let isMounted = true;
+    let reconnectTimeout: any;
 
-    const setupRealtime = async () => {
-      const authUser = (await supabase.auth.getUser()).data.user;
-      if (!authUser || !isMounted) return;
+    const connectWebSocket = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
+      
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        if (!isMounted) return;
+        const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+        if (token) {
+          ws?.send(JSON.stringify({ type: 'auth', token }));
+        }
+      };
 
-      const channelName = `user-notifications-${authUser.id}-${Math.random().toString(36).substring(2, 9)}`;
-      const newChannel = supabase
-        .channel(channelName)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'notifications',
-            filter: `user_id=eq.${authUser.id}`,
-          },
-          (payload) => {
-            if (!isMounted) return;
-            if (payload.eventType === 'INSERT') {
-              const newNotif = payload.new as NotificationItem;
-              setNotifications(prev => [newNotif, ...prev.filter(n => n.id !== newNotif.id)]);
-              setUnreadCount(prev => prev + 1);
-            } else if (payload.eventType === 'UPDATE') {
-              const updatedNotif = payload.new as NotificationItem;
-              setNotifications(prev => prev.map(n => n.id === updatedNotif.id ? updatedNotif : n));
-              // recalculate unread count
-              setNotifications(prev => {
-                const count = prev.filter(n => !n.is_read).length;
-                setUnreadCount(count);
-                return prev;
-              });
-            }
+      ws.onmessage = (event) => {
+        if (!isMounted) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'notification_update') {
+            const newNotif = data.payload as NotificationItem;
+            setNotifications(prev => {
+              const exists = prev.find(n => n.id === newNotif.id);
+              if (exists) {
+                return prev.map(n => n.id === newNotif.id ? newNotif : n);
+              } else {
+                return [newNotif, ...prev];
+              }
+            });
+            // Recalculate unread count
+            setNotifications(prev => {
+              const count = prev.filter(n => !n.is_read).length;
+              setUnreadCount(count);
+              return prev;
+            });
           }
-        )
-        .subscribe();
+        } catch (e) {
+          console.error('WS Error parsing message:', e);
+        }
+      };
 
-      if (isMounted) {
-        channel = newChannel;
-      } else {
-        supabase.removeChannel(newChannel);
-      }
+      ws.onclose = () => {
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connectWebSocket, 5000);
+        }
+      };
     };
 
-    setupRealtime();
+    connectWebSocket();
 
     return () => {
       isMounted = false;
-      if (channel) {
-        supabase.removeChannel(channel);
+      clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.close();
       }
     };
   }, []);
@@ -174,7 +167,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true, read_at: new Date().toISOString() } : n));
       setUnreadCount(prev => Math.max(0, prev - 1));
 
-      await supabase.rpc('mark_notification_read', { p_notification_id: id });
+      await apiFetch(`/notifications/${id}/read`, { method: 'POST' });
     } catch (err) {
       console.error('Error marking notification read:', err);
     }
@@ -186,7 +179,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true, read_at: new Date().toISOString() })));
       setUnreadCount(0);
 
-      await supabase.rpc('mark_all_notifications_read');
+      await apiFetch('/notifications/read-all', { method: 'POST' });
     } catch (err) {
       console.error('Error marking all notifications read:', err);
     }

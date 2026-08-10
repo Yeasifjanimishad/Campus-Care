@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { ManagedUser, UserProfile, UserRole } from '../types';
 import { 
   Users, 
@@ -190,20 +191,9 @@ export const SuperAdminUserManager: React.FC<SuperAdminUserManagerProps> = ({ us
 
     try {
       let baseList: ManagedUser[] = [];
-      if (isSupabaseConfigured) {
-        const { data, error: fetchErr } = await supabase
-          .from('users')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (fetchErr) {
-          console.warn('[SuperAdminUserManager]: Supabase error, using fallback users:', fetchErr.message);
-          baseList = SAMPLE_USERS;
-        } else if (data && data.length > 0) {
-          baseList = data as ManagedUser[];
-        } else {
-          baseList = SAMPLE_USERS;
-        }
+      const response = await apiFetch('/admin/users?limit=100');
+      if (response && response.data) {
+        baseList = response.data;
       } else {
         baseList = SAMPLE_USERS;
       }
@@ -277,23 +267,13 @@ export const SuperAdminUserManager: React.FC<SuperAdminUserManagerProps> = ({ us
     const targetUser = roleChangeModal.targetUser;
     const newRole = roleChangeModal.newRole;
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('update_user_role', {
-          p_user_id: targetUser.id,
-          p_new_role: newRole,
-        });
-
-        if (rpcErr || (data && data.success === false)) {
-          // Direct update fallback
-          await supabase
-            .from('users')
-            .update({ role: newRole })
-            .eq('id', targetUser.id);
-        }
-      } catch (err: any) {
-        console.warn('[Role Update Notice]: Saved via local state fallback:', err?.message || err);
-      }
+    try {
+      await apiFetch(`/admin/users/${targetUser.id}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: newRole })
+      });
+    } catch (err: any) {
+      console.warn('[Role Update Notice]: Saved via local state fallback:', err?.message || err);
     }
 
     if (newRole === 'doctor') {
@@ -375,23 +355,13 @@ export const SuperAdminUserManager: React.FC<SuperAdminUserManagerProps> = ({ us
     const targetUser = statusChangeModal.targetUser;
     const newStatus = statusChangeModal.newStatus;
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error: rpcErr } = await supabase.rpc('update_user_status', {
-          p_user_id: targetUser.id,
-          p_status: newStatus,
-        });
-
-        if (rpcErr || (data && data.success === false)) {
-          // Direct update fallback
-          await supabase
-            .from('users')
-            .update({ status: newStatus })
-            .eq('id', targetUser.id);
-        }
-      } catch (err: any) {
-        console.warn('[Status Update Notice]: Saved via local state fallback:', err?.message || err);
-      }
+    try {
+      await apiFetch(`/admin/users/${targetUser.id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: newStatus })
+      });
+    } catch (err: any) {
+      console.warn('[Status Update Notice]: Saved via local state fallback:', err?.message || err);
     }
 
     saveLocalUserOverride(targetUser.id, { status: newStatus });

@@ -17,7 +17,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { apiFetch } from '../lib/api';
 import { UserProfile, IncidentReport, IncidentCategory } from '../types';
 
 interface StudentIncidentReportingProps {
@@ -66,26 +66,15 @@ export const StudentIncidentReporting: React.FC<StudentIncidentReportingProps> =
   const fetchReports = useCallback(async () => {
     let remoteReports: IncidentReport[] = [];
 
-    if (isSupabaseConfigured) {
-      try {
-        setLoading(true);
-        setErrorMsg(null);
-
-        const { data: authData } = await supabase.auth.getUser();
-        const studentId = authData?.user?.id || user.id || 'std-101';
-
-        const { data, error } = await supabase
-          .from('incident_reports')
-          .select('*')
-          .eq('reporter_id', studentId)
-          .order('created_at', { ascending: false });
-
-        if (!error && data) {
-          remoteReports = data as IncidentReport[];
-        }
-      } catch (err: any) {
-        console.warn('Notice loading student reports from Supabase:', err?.message || err);
+    try {
+      setLoading(true);
+      setErrorMsg(null);
+      const response = await apiFetch('/incidents');
+      if (response && response.data) {
+        remoteReports = response.data;
       }
+    } catch (err: any) {
+      console.warn('Notice loading student reports from backend:', err?.message || err);
     }
 
     // Read local reports
@@ -153,31 +142,29 @@ export const StudentIncidentReporting: React.FC<StudentIncidentReportingProps> =
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Upload files to Supabase Storage
-  const uploadFiles = async (userId: string): Promise<string[]> => {
+  // Upload files to Supabase Storage via backend API
+  const uploadFiles = async (): Promise<string[]> => {
     const uploadedPaths: string[] = [];
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
       setUploadProgress(`Uploading photo ${i + 1} of ${selectedFiles.length}...`);
 
-      const fileExt = file.name.split('.').pop() || 'jpg';
-      const uniqueName = `${userId}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+      const formData = new FormData();
+      formData.append('file', file);
 
-      const { data, error } = await supabase.storage
-        .from('incident-evidence')
-        .upload(uniqueName, file, {
-          cacheControl: '3600',
-          upsert: false
+      try {
+        const data = await apiFetch('/upload/incident-evidence', {
+          method: 'POST',
+          body: formData
         });
 
-      if (error) {
-        console.error('File upload error:', error);
-        throw new Error(`Failed to upload ${file.name}: ${error.message}`);
-      }
-
-      if (data?.path) {
-        uploadedPaths.push(data.path);
+        if (data?.path) {
+          uploadedPaths.push(data.path);
+        }
+      } catch (err: any) {
+        console.error('File upload error:', err);
+        throw new Error(`Failed to upload ${file.name}: ${err.message}`);
       }
     }
 
@@ -204,54 +191,36 @@ export const StudentIncidentReporting: React.FC<StudentIncidentReportingProps> =
       setSubmitting(true);
       let submitted = false;
 
-      if (isSupabaseConfigured) {
-        try {
-          const authUser = (await supabase.auth.getUser()).data?.user;
-          const reporterId = authUser?.id || user.id || 'std-101';
-
-          let evidencePaths: string[] = [];
-          if (selectedFiles.length > 0 && authUser) {
-            try {
-              evidencePaths = await uploadFiles(authUser.id);
-            } catch (e) {
-              console.warn('[StudentIncidentReporting] Photo upload notice:', e);
-            }
+      try {
+        let evidencePaths: string[] = [];
+        if (selectedFiles.length > 0) {
+          try {
+            evidencePaths = await uploadFiles();
+          } catch (e) {
+            console.warn('[StudentIncidentReporting] Photo upload notice:', e);
           }
-
-          setUploadProgress('Saving incident report...');
-
-          const { data, error } = await supabase.rpc('create_incident_report', {
-            p_category: category,
-            p_title: title.trim(),
-            p_description: description.trim(),
-            p_location: location.trim() || null,
-            p_incident_date: incidentDate,
-            p_incident_time: incidentTime || null,
-            p_evidence_urls: evidencePaths
-          });
-
-          if (!error) {
-            submitted = true;
-          } else {
-            const { error: insertError } = await supabase
-              .from('incident_reports')
-              .insert({
-                reporter_id: reporterId,
-                category,
-                title: title.trim(),
-                description: description.trim(),
-                location: location.trim() || null,
-                incident_date: incidentDate,
-                incident_time: incidentTime || null,
-                evidence_urls: evidencePaths,
-                status: 'submitted'
-              });
-
-            if (!insertError) submitted = true;
-          }
-        } catch (err) {
-          console.warn('[StudentIncidentReporting] Supabase submission notice:', err);
         }
+
+        setUploadProgress('Saving incident report...');
+
+        const response = await apiFetch('/incidents', {
+          method: 'POST',
+          body: JSON.stringify({
+            category,
+            title: title.trim(),
+            description: description.trim(),
+            location: location.trim() || null,
+            incident_date: incidentDate,
+            incident_time: incidentTime || null,
+            evidence_urls: evidencePaths
+          })
+        });
+
+        if (response && response.id) {
+          submitted = true;
+        }
+      } catch (err) {
+        console.warn('[StudentIncidentReporting] Backend submission notice:', err);
       }
 
       const newReport: IncidentReport = {

@@ -1,18 +1,27 @@
-import { supabase } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 const BASE_URL = '/api';
 
 export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
-  // Get the current session
-  const { data: { session } } = await supabase.auth.getSession();
-  
   const headers = new Headers(options.headers || {});
   
-  if (session?.access_token) {
-    headers.set('Authorization', `Bearer ${session.access_token}`);
+  if (isSupabaseConfigured) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers.set('Authorization', `Bearer ${session.access_token}`);
+    }
+  } else {
+    // Fallback to local storage for mock auth
+    const token = localStorage.getItem('campuscare_session_token') || localStorage.getItem('campuscare_mock_token');
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
   }
   
-  headers.set('Content-Type', 'application/json');
+  // Set Content-Type to JSON if not explicitly set and body is not FormData
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   const response = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
@@ -20,8 +29,12 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
   });
 
   if (response.status === 401) {
-    // Optionally trigger a logout event if unauthorized
-    await supabase.auth.signOut();
+    if (isSupabaseConfigured) {
+      await supabase.auth.signOut();
+    } else {
+      localStorage.removeItem('campuscare_session_token');
+      localStorage.removeItem('campuscare_mock_token');
+    }
     window.location.hash = 'login';
     throw new Error('Unauthorized');
   }

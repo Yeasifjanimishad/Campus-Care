@@ -20,6 +20,14 @@
     "clean": "rm -rf frontend/dist backend/dist"
   },
   "dependencies": {
-    "concurrently": "^10.0.4"
+    "concurrently": "^10.0.4",
+    "multer": "^2.2.0",
+    "node-cron": "^4.6.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/multer": "^2.2.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/ws": "^8.18.1"
   }
 }
