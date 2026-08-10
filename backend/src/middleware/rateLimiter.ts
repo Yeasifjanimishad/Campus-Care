@@ -4,7 +4,7 @@ import { Request, Response } from 'express';
 // 1. Default API Rate Limiter: 100 requests per 15 minutes per IP
 export const defaultRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 100,
+  limit: 1000,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -20,7 +20,7 @@ export const defaultRateLimiter = rateLimit({
 // 2. Auth Endpoints Rate Limiter: 10 login / signup attempts per 15 minutes per IP
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 10,
+  limit: 1000,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {
@@ -36,7 +36,7 @@ export const authRateLimiter = rateLimit({
 // 3. Public Endpoints (e.g. Doctor Request Access): 5 requests per hour per IP
 export const publicEndpointLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  limit: 5,
+  limit: 1000,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (req: Request, res: Response) => {

@@ -15,48 +15,14 @@ import {
   Loader2, 
   AlertTriangle,
   FileCheck,
-  Calendar
+  Calendar,
+  Info
 } from 'lucide-react';
 import { DoctorAccessRequest } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { apiFetch } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 
-const FALLBACK_SEED_REQUESTS: DoctorAccessRequest[] = [
-  {
-    id: 'req-001',
-    doctor_id: 'DOC-5011',
-    full_name: 'Dr. Shahriar Kabir',
-    email: 'dr.shahriar@diu.edu.bd',
-    phone: '+880 1711-889900',
-    department: 'Cardiology & Emergency',
-    message: 'Requesting verified doctor access to handle campus cardiovascular emergencies and student consultations.',
-    status: 'pending',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
-  },
-  {
-    id: 'req-002',
-    doctor_id: 'DOC-5012',
-    full_name: 'Dr. Mariam Begum',
-    email: 'dr.mariam@diu.edu.bd',
-    phone: '+880 1819-223344',
-    department: 'Student Counseling & Psychiatry',
-    message: 'Submitted clinical credentials for mental health & stress management counseling portal privileges.',
-    status: 'pending',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 36).toISOString(),
-  },
-  {
-    id: 'req-003',
-    doctor_id: 'DOC-5009',
-    full_name: 'Dr. Sarah Ahmed',
-    email: 'doctor@diu.edu.bd',
-    phone: '+880 1711-223344',
-    department: 'Medical Center',
-    message: 'Senior attending physician registration.',
-    status: 'approved',
-    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(),
-  },
-];
 
 export const DoctorAccessRequestsAdmin: React.FC = () => {
   const { session, userProfile } = useAuth();
@@ -73,6 +39,9 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
   // Reject review modal
   const [rejectingRequest, setRejectingRequest] = useState<DoctorAccessRequest | null>(null);
   const [rejectNote, setRejectNote] = useState('');
+
+  // Password Reveal Modal
+  const [tempPasswordData, setTempPasswordData] = useState<{ doctorName: string; email: string; tempPassword?: string | null, isNewUser?: boolean } | null>(null);
 
   // Helper for reading/writing local doctor request overrides
   const getLocalDoctorRequests = (): DoctorAccessRequest[] => {
@@ -123,9 +92,6 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
     remoteList.forEach(r => {
       if (!map.has(r.id)) map.set(r.id, r);
     });
-    FALLBACK_SEED_REQUESTS.forEach(r => {
-      if (!map.has(r.id)) map.set(r.id, r);
-    });
 
     const merged = Array.from(map.values());
     merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -150,11 +116,16 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
       reviewed_by: userProfile?.name || 'Admin',
     };
 
+    let tempPwd = null;
+    let isNew = false;
+
     if (isSupabaseConfigured) {
       try {
-        await apiFetch(`/doctor-requests/${request.id}/approve`, {
+        const response = await apiFetch(`/doctor-requests/${request.id}/approve`, {
           method: 'POST'
         });
+        tempPwd = response.tempPassword;
+        isNew = response.isNewUser;
       } catch (err: any) {
         console.warn('[Approve Doctor Request Notice]: Falling back to local state update:', err);
       }
@@ -167,6 +138,15 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
       type: 'success',
       message: `Dr. ${request.full_name} has been approved and granted Doctor role.`,
     });
+
+    if (tempPwd || isNew) {
+      setTempPasswordData({
+        doctorName: request.full_name,
+        email: request.email,
+        tempPassword: tempPwd,
+        isNewUser: isNew
+      });
+    }
   };
 
   // Reject Doctor Request Handler (Atomic RPC + local fallback)
@@ -542,6 +522,57 @@ export const DoctorAccessRequestsAdmin: React.FC = () => {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Temp Password Modal */}
+      {tempPasswordData && (
+        <div className="fixed inset-0 bg-ink/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-surface rounded-2xl border border-border max-w-md w-full p-6 space-y-4 shadow-lg text-center">
+            <div className="w-12 h-12 rounded-2xl bg-wellness/10 text-wellness mx-auto flex items-center justify-center mb-2 border border-wellness/20">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            
+            <h3 className="font-heading font-bold text-xl text-ink">Doctor Account Created</h3>
+            <p className="text-sm text-ink-muted">
+              Credentials for <strong className="text-ink">{tempPasswordData.doctorName}</strong> ({tempPasswordData.email})
+            </p>
+
+            <div className="bg-background rounded-xl p-4 border border-border mt-4 text-left space-y-3">
+              {tempPasswordData.tempPassword ? (
+                <>
+                  <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Temporary Password</p>
+                  <div className="flex items-center justify-between bg-surface border border-border rounded-lg p-3">
+                    <code className="text-sm font-mono font-bold text-primary select-all">
+                      {tempPasswordData.tempPassword}
+                    </code>
+                    <button 
+                      onClick={() => navigator.clipboard.writeText(tempPasswordData.tempPassword || '')}
+                      className="text-xs text-primary hover:text-primary-hover font-semibold px-2 py-1 rounded bg-primary/10"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p className="text-xs text-emergency font-medium flex items-start gap-1.5 pt-1">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    Please securely share this temporary password with the doctor. They must use it to log in.
+                  </p>
+                </>
+              ) : tempPasswordData.isNewUser === false ? (
+                <div className="p-3 bg-medical/10 border border-medical/20 rounded-lg text-sm text-medical font-medium flex items-center gap-2">
+                  <Info className="w-5 h-5 shrink-0" />
+                  <p>This user already has an active account. Their role has been elevated to Doctor. They can log in with their existing password.</p>
+                </div>
+              ) : null}
+            </div>
+
+            <button
+              onClick={() => setTempPasswordData(null)}
+              className="w-full py-3 mt-4 rounded-xl bg-primary hover:bg-primary-hover text-surface font-semibold text-sm transition-all focus-ring cursor-pointer"
+            >
+              Done
+            </button>
           </div>
         </div>
       )}

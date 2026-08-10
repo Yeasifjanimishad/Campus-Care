@@ -133,11 +133,54 @@ router.get('/stats', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     try {
       const authClient = createAuthClient(req.token!);
-      const { data, error } = await authClient.rpc('get_super_admin_stats');
       
-      if (error) {
-        throw new AppError(500, 'Failed to fetch admin stats', error.message);
-      }
+      const [
+        { count: total_users },
+        { count: students_faculty },
+        { count: doctors },
+        { count: emergency_admins },
+        { count: super_admins },
+        { count: active_users },
+        { count: suspended_users },
+        { count: pending_doctor_requests },
+        { count: active_sos_alerts },
+        { count: today_appointments },
+        { count: today_incidents },
+        { count: total_broadcasts },
+        { count: total_health_records }
+      ] = await Promise.all([
+        authClient.from('users').select('*', { count: 'exact', head: true }),
+        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'student_faculty'),
+        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'doctor'),
+        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'emergency_admin'),
+        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'super_admin'),
+        authClient.from('users').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        authClient.from('users').select('*', { count: 'exact', head: true }).eq('status', 'suspended'),
+        authClient.from('doctor_access_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        authClient.from('sos_alerts').select('*', { count: 'exact', head: true }).in('status', ['active', 'acknowledged']),
+        authClient.from('appointments').select('*', { count: 'exact', head: true }).eq('appointment_date', new Date().toISOString().split('T')[0]),
+        authClient.from('incident_reports').select('*', { count: 'exact', head: true }).gte('created_at', new Date().toISOString().split('T')[0] + 'T00:00:00Z'),
+        authClient.from('broadcasts').select('*', { count: 'exact', head: true }),
+        authClient.from('health_records').select('*', { count: 'exact', head: true })
+      ]);
+
+      const data = {
+        total_users: total_users || 0,
+        students_faculty: students_faculty || 0,
+        doctors: doctors || 0,
+        emergency_admins: emergency_admins || 0,
+        super_admins: super_admins || 0,
+        active_users: active_users || 0,
+        suspended_users: suspended_users || 0,
+        disabled_users: 0,
+        pending_doctor_requests: pending_doctor_requests || 0,
+        active_sos_alerts: active_sos_alerts || 0,
+        today_appointments: today_appointments || 0,
+        today_incidents: today_incidents || 0,
+        unread_notifications: 0,
+        total_broadcasts: total_broadcasts || 0,
+        total_health_records: total_health_records || 0
+      };
 
       return res.json(data);
     } catch (err) {

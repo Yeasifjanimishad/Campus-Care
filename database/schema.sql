@@ -1,7 +1,9 @@
 -- CampusCare Supabase Schema: Doctor Access Requests, Doctors Table & Security
 -- Run this in the Supabase SQL Editor to enforce strict RLS and database security.
 
--- 0. User Profiles Table (public.users)
+-- ============================================================================
+-- STEP 1: User Profiles Table (public.users) + Admin Helper Function
+-- ============================================================================
 -- Dependency: Linked directly to Supabase Auth (auth.users.id).
 CREATE TABLE IF NOT EXISTS public.users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -15,6 +17,44 @@ CREATE TABLE IF NOT EXISTS public.users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.users that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'email', 'name', 'role', 'university_id', 'department', 'phone', 'status', 'created_at', 'updated_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'users'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.users ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: users.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.users already existed with a different/older shape.
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'student_faculty';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS university_id TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS department TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+UPDATE public.users SET email = '' WHERE email IS NULL;
+ALTER TABLE public.users ALTER COLUMN email SET NOT NULL;
+UPDATE public.users SET name = '' WHERE name IS NULL;
+ALTER TABLE public.users ALTER COLUMN name SET NOT NULL;
+
 
 CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
 CREATE INDEX IF NOT EXISTS idx_users_status ON public.users(status);
@@ -40,13 +80,35 @@ CREATE POLICY "Admins and doctors can view user profiles"
     )
   );
 
+-- Helper Function: is_admin() — must be defined before any policy uses it.
+-- (This was originally defined further down the file, after several policies
+-- already referenced it, which caused: ERROR 42883 function public.is_admin()
+-- does not exist. It now lives here, immediately before its first use.)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users
+    WHERE id = auth.uid()
+    AND role IN ('super_admin', 'emergency_admin')
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
+
 CREATE POLICY "Admins can manage user profiles"
   ON public.users FOR ALL
   TO authenticated
   USING (public.is_admin())
   WITH CHECK (public.is_admin());
 
--- 1. Create doctor_access_requests table if it does not exist
+-- ============================================================================
+-- STEP 2: Doctor Access Requests Table
+-- ============================================================================
 CREATE TABLE IF NOT EXISTS public.doctor_access_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name TEXT NOT NULL,
@@ -61,6 +123,49 @@ CREATE TABLE IF NOT EXISTS public.doctor_access_requests (
   reviewed_by UUID,
   review_note TEXT
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.doctor_access_requests that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'full_name', 'email', 'doctor_id', 'department', 'phone', 'message', 'status', 'created_at', 'reviewed_at', 'reviewed_by', 'review_note'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'doctor_access_requests'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.doctor_access_requests ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: doctor_access_requests.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.doctor_access_requests already existed with a different/older shape.
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS doctor_id TEXT;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS department TEXT;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS reviewed_by UUID;
+ALTER TABLE public.doctor_access_requests ADD COLUMN IF NOT EXISTS review_note TEXT;
+UPDATE public.doctor_access_requests SET full_name = '' WHERE full_name IS NULL;
+ALTER TABLE public.doctor_access_requests ALTER COLUMN full_name SET NOT NULL;
+UPDATE public.doctor_access_requests SET email = '' WHERE email IS NULL;
+ALTER TABLE public.doctor_access_requests ALTER COLUMN email SET NOT NULL;
+UPDATE public.doctor_access_requests SET doctor_id = '' WHERE doctor_id IS NULL;
+ALTER TABLE public.doctor_access_requests ALTER COLUMN doctor_id SET NOT NULL;
+UPDATE public.doctor_access_requests SET department = '' WHERE department IS NULL;
+ALTER TABLE public.doctor_access_requests ALTER COLUMN department SET NOT NULL;
 
 -- Partial unique indexes to prevent duplicate active pending requests
 CREATE UNIQUE INDEX IF NOT EXISTS idx_doctor_access_pending_email 
@@ -89,6 +194,54 @@ CREATE TABLE IF NOT EXISTS public.doctors (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Safety net: relax any legacy NOT NULL column on public.doctors that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'user_id', 'doctor_id', 'full_name', 'email', 'department', 'specialization', 'phone', 'designation', 'bio', 'profile_image_url', 'is_available', 'created_at', 'updated_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'doctors'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.doctors ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: doctors.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.doctors already existed with a different/older shape.
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS doctor_id TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS department TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS specialization TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS designation TEXT DEFAULT 'Consultant Physician';
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS bio TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS profile_image_url TEXT;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT true;
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.doctors ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+UPDATE public.doctors SET doctor_id = '' WHERE doctor_id IS NULL;
+ALTER TABLE public.doctors ALTER COLUMN doctor_id SET NOT NULL;
+UPDATE public.doctors SET full_name = '' WHERE full_name IS NULL;
+ALTER TABLE public.doctors ALTER COLUMN full_name SET NOT NULL;
+UPDATE public.doctors SET email = '' WHERE email IS NULL;
+ALTER TABLE public.doctors ALTER COLUMN email SET NOT NULL;
+UPDATE public.doctors SET department = '' WHERE department IS NULL;
+ALTER TABLE public.doctors ALTER COLUMN department SET NOT NULL;
+UPDATE public.doctors SET specialization = '' WHERE specialization IS NULL;
+ALTER TABLE public.doctors ALTER COLUMN specialization SET NOT NULL;
+
+
 -- Indexes for performance and appointment discovery queries
 CREATE INDEX IF NOT EXISTS idx_doctors_user_id ON public.doctors(user_id);
 CREATE INDEX IF NOT EXISTS idx_doctors_department ON public.doctors(department);
@@ -113,23 +266,6 @@ CREATE TRIGGER tr_doctors_updated_at
   BEFORE UPDATE ON public.doctors
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_updated_at();
-
--- 3. Helper Function to check if caller is an authorized Admin
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public, pg_temp
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.users
-    WHERE id = auth.uid()
-    AND role IN ('super_admin', 'emergency_admin')
-  );
-$$;
-
-GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
 
 -- 4. Enable RLS on doctor_access_requests
 ALTER TABLE public.doctor_access_requests ENABLE ROW LEVEL SECURITY;
@@ -603,6 +739,51 @@ CREATE TABLE IF NOT EXISTS public.appointments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.appointments that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'student_id', 'doctor_id', 'appointment_date', 'start_time', 'end_time', 'reason', 'symptoms', 'status', 'student_note', 'doctor_note', 'rejection_reason', 'created_at', 'updated_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'appointments'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.appointments ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: appointments.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.appointments already existed with a different/older shape.
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES public.doctors(id) ON DELETE CASCADE;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS appointment_date DATE;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS start_time TIME;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS end_time TIME;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS reason TEXT;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS symptoms TEXT;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS student_note TEXT;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS doctor_note TEXT;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+-- NOTE: appointments.student_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+-- NOTE: appointments.doctor_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+UPDATE public.appointments SET appointment_date = CURRENT_DATE WHERE appointment_date IS NULL;
+ALTER TABLE public.appointments ALTER COLUMN appointment_date SET NOT NULL;
+-- NOTE: appointments.start_time is NOT NULL (TIME) with no default — left nullable for legacy-row safety.
+-- NOTE: appointments.end_time is NOT NULL (TIME) with no default — left nullable for legacy-row safety.
+UPDATE public.appointments SET reason = '' WHERE reason IS NULL;
+ALTER TABLE public.appointments ALTER COLUMN reason SET NOT NULL;
 
 ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS doctor_note TEXT;
 ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
@@ -1158,6 +1339,44 @@ CREATE TABLE IF NOT EXISTS public.sos_alerts (
   resolved_by UUID REFERENCES public.users(id)
 );
 
+-- Safety net: relax any legacy NOT NULL column on public.sos_alerts that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'student_id', 'latitude', 'longitude', 'location_accuracy', 'status', 'emergency_type', 'message', 'resolution_note', 'created_at', 'acknowledged_at', 'acknowledged_by', 'resolved_at', 'resolved_by'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'sos_alerts'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.sos_alerts ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: sos_alerts.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.sos_alerts already existed with a different/older shape.
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS latitude NUMERIC;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS longitude NUMERIC;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS location_accuracy NUMERIC;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS emergency_type TEXT DEFAULT 'medical';
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS resolution_note TEXT;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS acknowledged_by UUID REFERENCES public.users(id);
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE public.sos_alerts ADD COLUMN IF NOT EXISTS resolved_by UUID REFERENCES public.users(id);
+-- NOTE: sos_alerts.student_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+
 -- Indexes for performance & Realtime admin monitoring queries
 CREATE INDEX IF NOT EXISTS idx_sos_alerts_student_id ON public.sos_alerts(student_id);
 CREATE INDEX IF NOT EXISTS idx_sos_alerts_status ON public.sos_alerts(status);
@@ -1517,6 +1736,51 @@ CREATE TABLE IF NOT EXISTS public.incident_reports (
   reviewed_at TIMESTAMPTZ,
   reviewed_by UUID REFERENCES public.users(id)
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.incident_reports that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'reporter_id', 'category', 'title', 'description', 'incident_date', 'incident_time', 'location', 'evidence_urls', 'status', 'admin_note', 'created_at', 'updated_at', 'reviewed_at', 'reviewed_by'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'incident_reports'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.incident_reports ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: incident_reports.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.incident_reports already existed with a different/older shape.
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS reporter_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS incident_date DATE DEFAULT CURRENT_DATE;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS incident_time TIME;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS location TEXT;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS evidence_urls TEXT[] DEFAULT '{}';
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'submitted';
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS admin_note TEXT;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE public.incident_reports ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES public.users(id);
+-- NOTE: incident_reports.reporter_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+UPDATE public.incident_reports SET category = '' WHERE category IS NULL;
+ALTER TABLE public.incident_reports ALTER COLUMN category SET NOT NULL;
+UPDATE public.incident_reports SET title = '' WHERE title IS NULL;
+ALTER TABLE public.incident_reports ALTER COLUMN title SET NOT NULL;
+UPDATE public.incident_reports SET description = '' WHERE description IS NULL;
+ALTER TABLE public.incident_reports ALTER COLUMN description SET NOT NULL;
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_incident_reports_reporter_id ON public.incident_reports(reporter_id);
@@ -1893,6 +2157,46 @@ CREATE TABLE IF NOT EXISTS public.health_records (
   CONSTRAINT unique_appointment_health_record UNIQUE (appointment_id)
 );
 
+-- Safety net: relax any legacy NOT NULL column on public.health_records that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'student_id', 'doctor_id', 'appointment_id', 'diagnosis', 'clinical_summary', 'prescription', 'treatment_plan', 'follow_up_instructions', 'doctor_note', 'created_at', 'updated_at', 'last_updated_by'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'health_records'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.health_records ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: health_records.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.health_records already existed with a different/older shape.
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS student_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES public.doctors(id) ON DELETE CASCADE;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS appointment_id UUID REFERENCES public.appointments(id) ON DELETE SET NULL;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS diagnosis TEXT;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS clinical_summary TEXT;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS prescription TEXT;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS treatment_plan TEXT;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS follow_up_instructions TEXT;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS doctor_note TEXT;
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.health_records ADD COLUMN IF NOT EXISTS last_updated_by UUID REFERENCES public.users(id);
+-- NOTE: health_records.student_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+-- NOTE: health_records.doctor_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+UPDATE public.health_records SET diagnosis = '' WHERE diagnosis IS NULL;
+ALTER TABLE public.health_records ALTER COLUMN diagnosis SET NOT NULL;
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_health_records_student_id ON public.health_records(student_id);
 CREATE INDEX IF NOT EXISTS idx_health_records_doctor_id ON public.health_records(doctor_id);
@@ -2200,6 +2504,44 @@ CREATE TABLE IF NOT EXISTS public.broadcasts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Safety net: relax any legacy NOT NULL column on public.broadcasts that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'title', 'message', 'category', 'priority', 'target_role', 'created_by', 'created_at', 'updated_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'broadcasts'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.broadcasts ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: broadcasts.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.broadcasts already existed with a different/older shape.
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal';
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS target_role TEXT DEFAULT 'all';
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+UPDATE public.broadcasts SET title = '' WHERE title IS NULL;
+ALTER TABLE public.broadcasts ALTER COLUMN title SET NOT NULL;
+UPDATE public.broadcasts SET message = '' WHERE message IS NULL;
+ALTER TABLE public.broadcasts ALTER COLUMN message SET NOT NULL;
+UPDATE public.broadcasts SET category = '' WHERE category IS NULL;
+ALTER TABLE public.broadcasts ALTER COLUMN category SET NOT NULL;
+
 -- Table: public.notifications
 CREATE TABLE IF NOT EXISTS public.notifications (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2213,6 +2555,46 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   read_at TIMESTAMPTZ
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.notifications that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'user_id', 'broadcast_id', 'title', 'message', 'category', 'priority', 'is_read', 'created_at', 'read_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'notifications'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.notifications ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: notifications.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.notifications already existed with a different/older shape.
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS broadcast_id UUID REFERENCES public.broadcasts(id) ON DELETE CASCADE;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal';
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT false;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+-- NOTE: notifications.user_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+UPDATE public.notifications SET title = '' WHERE title IS NULL;
+ALTER TABLE public.notifications ALTER COLUMN title SET NOT NULL;
+UPDATE public.notifications SET message = '' WHERE message IS NULL;
+ALTER TABLE public.notifications ALTER COLUMN message SET NOT NULL;
+UPDATE public.notifications SET category = '' WHERE category IS NULL;
+ALTER TABLE public.notifications ALTER COLUMN category SET NOT NULL;
 
 -- Indexes for performance & query speed
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
@@ -2436,8 +2818,31 @@ GRANT EXECUTE ON FUNCTION public.mark_all_notifications_read() TO authenticated;
 -- 22. STEP 10: Super Admin Dashboard, User Management & Audit Logging System
 -- ============================================================================
 
--- Add account status column to public.users if not present
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'disabled'));
+-- Add account status column to public.users if not present, and make sure the
+-- CHECK constraint allows 'disabled' even if the column/constraint already existed
+-- from the original table definition (ADD COLUMN IF NOT EXISTS is a no-op on an
+-- existing column, so it silently would NOT widen an existing constraint).
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+
+DO $$
+DECLARE
+  v_constraint_name TEXT;
+BEGIN
+  SELECT con.conname INTO v_constraint_name
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+  WHERE nsp.nspname = 'public'
+    AND rel.relname = 'users'
+    AND con.contype = 'c'
+    AND pg_get_constraintdef(con.oid) ILIKE '%status%';
+
+  IF v_constraint_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE public.users DROP CONSTRAINT %I', v_constraint_name);
+  END IF;
+
+  ALTER TABLE public.users ADD CONSTRAINT users_status_check CHECK (status IN ('active', 'suspended', 'disabled'));
+END $$;
 
 -- Table: public.admin_audit_logs
 CREATE TABLE IF NOT EXISTS public.admin_audit_logs (
@@ -2448,6 +2853,37 @@ CREATE TABLE IF NOT EXISTS public.admin_audit_logs (
   metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.admin_audit_logs that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'actor_id', 'action', 'target_user_id', 'metadata', 'created_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'admin_audit_logs'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.admin_audit_logs ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: admin_audit_logs.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.admin_audit_logs already existed with a different/older shape.
+ALTER TABLE public.admin_audit_logs ADD COLUMN IF NOT EXISTS actor_id UUID REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE public.admin_audit_logs ADD COLUMN IF NOT EXISTS action TEXT;
+ALTER TABLE public.admin_audit_logs ADD COLUMN IF NOT EXISTS target_user_id UUID REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE public.admin_audit_logs ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.admin_audit_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+UPDATE public.admin_audit_logs SET action = '' WHERE action IS NULL;
+ALTER TABLE public.admin_audit_logs ALTER COLUMN action SET NOT NULL;
 
 -- Indexes for audit performance
 CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_actor ON public.admin_audit_logs(actor_id);
@@ -2837,6 +3273,39 @@ CREATE TABLE IF NOT EXISTS public.appointment_reminders (
   CONSTRAINT uq_app_reminder_type_user UNIQUE (appointment_id, reminder_type, sent_to_user_id)
 );
 
+-- Safety net: relax any legacy NOT NULL column on public.appointment_reminders that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'appointment_id', 'reminder_type', 'sent_to_user_id', 'sent_at', 'delivery_status'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'appointment_reminders'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.appointment_reminders ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: appointment_reminders.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.appointment_reminders already existed with a different/older shape.
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS appointment_id UUID REFERENCES public.appointments(id) ON DELETE CASCADE;
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS reminder_type TEXT;
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS sent_to_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.appointment_reminders ADD COLUMN IF NOT EXISTS delivery_status TEXT DEFAULT 'delivered';
+-- NOTE: appointment_reminders.appointment_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+UPDATE public.appointment_reminders SET reminder_type = '' WHERE reminder_type IS NULL;
+ALTER TABLE public.appointment_reminders ALTER COLUMN reminder_type SET NOT NULL;
+-- NOTE: appointment_reminders.sent_to_user_id is NOT NULL with no default and no safe placeholder (FK/UUID) — left nullable for legacy-row safety; ensure your app always supplies it.
+
 CREATE INDEX IF NOT EXISTS idx_appointment_reminders_app_id ON public.appointment_reminders(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_appointment_reminders_user_id ON public.appointment_reminders(sent_to_user_id);
 
@@ -2856,6 +3325,35 @@ CREATE TABLE IF NOT EXISTS public.scheduler_logs (
   status TEXT NOT NULL DEFAULT 'success',
   details JSONB DEFAULT '{}'::jsonb
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.scheduler_logs that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'executed_at', 'reminders_sent', 'sos_escalations', 'status', 'details'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'scheduler_logs'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.scheduler_logs ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: scheduler_logs.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.scheduler_logs already existed with a different/older shape.
+ALTER TABLE public.scheduler_logs ADD COLUMN IF NOT EXISTS executed_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.scheduler_logs ADD COLUMN IF NOT EXISTS reminders_sent INT DEFAULT 0;
+ALTER TABLE public.scheduler_logs ADD COLUMN IF NOT EXISTS sos_escalations INT DEFAULT 0;
+ALTER TABLE public.scheduler_logs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'success';
+ALTER TABLE public.scheduler_logs ADD COLUMN IF NOT EXISTS details JSONB DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_scheduler_logs_executed_at ON public.scheduler_logs(executed_at DESC);
 
@@ -3190,7 +3688,6 @@ END $$;
 
 -- ============================================================================
 -- STEP 18: ADVANCED MONITORING, RELIABILITY & FAILURE RECOVERY
-============================================================================
 
 -- 1. System Health Events Table
 CREATE TABLE IF NOT EXISTS public.system_health_events (
@@ -3205,6 +3702,47 @@ CREATE TABLE IF NOT EXISTS public.system_health_events (
   resolved_by UUID REFERENCES public.users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.system_health_events that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'event_type', 'severity', 'component', 'message', 'metadata', 'resolved', 'resolved_at', 'resolved_by', 'created_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'system_health_events'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.system_health_events ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: system_health_events.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.system_health_events already existed with a different/older shape.
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS event_type TEXT;
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS severity TEXT;
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS component TEXT;
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS resolved BOOLEAN DEFAULT false;
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS resolved_by UUID REFERENCES public.users(id);
+ALTER TABLE public.system_health_events ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+UPDATE public.system_health_events SET event_type = '' WHERE event_type IS NULL;
+ALTER TABLE public.system_health_events ALTER COLUMN event_type SET NOT NULL;
+UPDATE public.system_health_events SET severity = '' WHERE severity IS NULL;
+ALTER TABLE public.system_health_events ALTER COLUMN severity SET NOT NULL;
+UPDATE public.system_health_events SET component = '' WHERE component IS NULL;
+ALTER TABLE public.system_health_events ALTER COLUMN component SET NOT NULL;
+UPDATE public.system_health_events SET message = '' WHERE message IS NULL;
+ALTER TABLE public.system_health_events ALTER COLUMN message SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_system_health_events_created_at ON public.system_health_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_system_health_events_severity ON public.system_health_events(severity);
@@ -3234,6 +3772,45 @@ CREATE TABLE IF NOT EXISTS public.scheduler_task_failures (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Safety net: relax any legacy NOT NULL column on public.scheduler_task_failures that this schema
+-- doesn't know about and doesn't populate (e.g. an old required column left over
+-- from a previous version of this table), so it can't block inserts this script
+-- or its RPC functions perform.
+DO $$
+DECLARE
+  r RECORD;
+  expected TEXT[] := ARRAY['id', 'task_type', 'reference_id', 'error_message', 'error_code', 'attempt_count', 'status', 'next_retry_at', 'resolved_at', 'metadata', 'created_at', 'updated_at'];
+BEGIN
+  FOR r IN
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'scheduler_task_failures'
+      AND is_nullable = 'NO' AND column_default IS NULL
+      AND column_name <> ALL(expected)
+  LOOP
+    EXECUTE format('ALTER TABLE public.scheduler_task_failures ALTER COLUMN %I DROP NOT NULL', r.column_name);
+    RAISE NOTICE 'Relaxed unexpected NOT NULL column: scheduler_task_failures.%', r.column_name;
+  END LOOP;
+END $$;
+
+
+-- Defensive column patch: backfills any column this schema depends on in case
+-- public.scheduler_task_failures already existed with a different/older shape.
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS task_type TEXT;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS reference_id UUID;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS error_code TEXT;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS attempt_count INTEGER DEFAULT 1;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'failed';
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE public.scheduler_task_failures ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+UPDATE public.scheduler_task_failures SET task_type = '' WHERE task_type IS NULL;
+ALTER TABLE public.scheduler_task_failures ALTER COLUMN task_type SET NOT NULL;
+UPDATE public.scheduler_task_failures SET error_message = '' WHERE error_message IS NULL;
+ALTER TABLE public.scheduler_task_failures ALTER COLUMN error_message SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_scheduler_failures_status ON public.scheduler_task_failures(status);
 CREATE INDEX IF NOT EXISTS idx_scheduler_failures_task_type ON public.scheduler_task_failures(task_type);
@@ -3396,13 +3973,16 @@ BEGIN
       resolved_by = v_caller_id
   WHERE id = p_event_id;
 
-  -- Log admin audit entry
+  -- Log admin audit entry (log_admin_audit signature: action, target_user_id, metadata)
   PERFORM public.log_admin_audit(
     'RESOLVE_HEALTH_EVENT',
-    'System health event resolved: ' || v_event.event_type || ' (' || v_event.component || ')',
-    p_event_id,
-    'system_health_events',
-    jsonb_build_object('resolved_by', v_caller_id, 'event_type', v_event.event_type)
+    NULL,
+    jsonb_build_object(
+      'event_id', p_event_id,
+      'event_type', v_event.event_type,
+      'component', v_event.component,
+      'message', 'System health event resolved: ' || v_event.event_type || ' (' || v_event.component || ')'
+    )
   );
 
   RETURN jsonb_build_object('success', true, 'message', 'System health event resolved successfully.');
@@ -3440,8 +4020,3 @@ END $$;
 --    );
 -- 3. To verify active cron schedules in Supabase:
 --    SELECT * FROM cron.job;
-
-
-
-
-
