@@ -1,0 +1,6 @@
+{
+  "name": "CampusCare",
+  "description": "University medical & emergency management platform",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
