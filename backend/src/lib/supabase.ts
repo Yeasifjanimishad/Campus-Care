@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { WebSocket } from 'ws';
 
 const DEFAULT_SUPABASE_URL = 'https://hyenslxslxotpnmwskve.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh5ZW5zbHhzbHhvdHBubXdza3ZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxOTY5NzEsImV4cCI6MjEwMTc3Mjk3MX0.sjW2PfD4HJ2lCWpEokDCbgPsqs-VT8VCOpNXlOCw6c4';
@@ -12,6 +13,9 @@ export const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KE
     autoRefreshToken: false,
     persistSession: false,
   },
+  realtime: {
+    transport: WebSocket as any,
+  },
 });
 
 export const createAuthClient = (token: string) => {
@@ -24,7 +28,10 @@ export const createAuthClient = (token: string) => {
       headers: {
         Authorization: `Bearer ${token}`
       }
-    }
+    },
+    realtime: {
+      transport: WebSocket as any,
+    },
   });
 };
 

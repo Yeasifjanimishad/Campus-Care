@@ -1,5 +1,12 @@
-import { rateLimit } from 'express-rate-limit';
+import { rateLimit, type Options } from 'express-rate-limit';
 import { Request, Response } from 'express';
+
+// Helper to normalize IP addresses (handles IPv6 properly)
+const ipKeyGenerator: Options['keyGenerator'] = (req) => {
+  // Normalize IPv6-mapped IPv4 addresses (e.g. ::ffff:127.0.0.1 -> 127.0.0.1)
+  const ip = req.ip || 'unknown';
+  return ip.replace(/^::ffff:/, '');
+};
 
 // 1. Default API Rate Limiter: 100 requests per 15 minutes per IP
 export const defaultRateLimiter = rateLimit({
@@ -54,8 +61,8 @@ export const sosRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   limit: 3,
   keyGenerator: (req: Request) => {
-    // If authenticated, rate limit per user id, otherwise fallback to IP
-    return (req as any).user?.id || req.ip || 'sos-anonymous';
+    // If authenticated, rate limit per user id, otherwise fallback to normalized IP
+    return (req as any).user?.id || ipKeyGenerator(req, {} as Response);
   },
   standardHeaders: 'draft-8',
   legacyHeaders: false,
