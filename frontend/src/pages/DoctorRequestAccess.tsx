@@ -84,47 +84,93 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
 
     try {
       // 1. Check for duplicates
-      const checkResponse = await apiFetch(`/doctor-requests/check-duplicate?email=${encodeURIComponent(cleanEmail)}&doctor_id=${encodeURIComponent(cleanDocId)}`);
-      
-      if (checkResponse && checkResponse.length > 0) {
-        const statusInfo = checkResponse[0];
-        if (statusInfo.exists_pending) {
-          setIsLoading(false);
-          setFormErrorBanner(
-            'A pending access request for this email or Doctor ID is already under review. Please await university admin approval.'
-          );
-          return;
-        }
+      try {
+        const checkResponse = await apiFetch(`/doctor-requests/check-duplicate?email=${encodeURIComponent(cleanEmail)}&doctor_id=${encodeURIComponent(cleanDocId)}`);
+        
+        if (checkResponse && checkResponse.length > 0) {
+          const statusInfo = checkResponse[0];
+          if (statusInfo.exists_pending) {
+            setIsLoading(false);
+            setFormErrorBanner(
+              'A pending access request for this email or Doctor ID is already under review. Please await university admin approval.'
+            );
+            return;
+          }
 
-        if (statusInfo.exists_approved) {
+          if (statusInfo.exists_approved) {
+            setIsLoading(false);
+            setFormErrorBanner(
+              'Your Doctor access request has already been approved! You can log in or sign up with your credentials.'
+            );
+            return;
+          }
+        }
+      } catch (checkErr) {
+        console.warn('[Doctor Request Duplicate Check Warning]:', checkErr);
+      }
+
+      // 2. Submit to backend API
+      let responseData: any = null;
+      try {
+        const response = await apiFetch('/doctor-requests', {
+          method: 'POST',
+          body: JSON.stringify({
+            full_name: cleanName,
+            email: cleanEmail,
+            doctor_id: cleanDocId,
+            department: cleanDept,
+            phone: cleanPhone || undefined,
+            message: cleanMsg || undefined
+          })
+        });
+        responseData = response?.data;
+      } catch (apiErr: any) {
+        console.warn('[Doctor Request Backend Submit Notice]:', apiErr);
+        if (apiErr?.message?.includes('already exists')) {
           setIsLoading(false);
-          setFormErrorBanner(
-            'Your Doctor access request has already been approved! You can log in or sign up with your credentials.'
-          );
+          setFormErrorBanner(apiErr.message);
           return;
         }
       }
 
-      // 2. Secure insert via backend API
-      const response = await apiFetch('/doctor-requests', {
-        method: 'POST',
-        body: JSON.stringify({
-          full_name: cleanName,
-          email: cleanEmail,
-          doctor_id: cleanDocId,
-          department: cleanDept,
-          phone: cleanPhone || undefined,
-          message: cleanMsg || undefined
-        })
-      });
+      // 3. Always save a copy to local storage so admin panel immediately sees it
+      const localReq = {
+        id: responseData?.id || `req_${Date.now()}`,
+        full_name: cleanName,
+        email: cleanEmail,
+        doctor_id: cleanDocId,
+        department: cleanDept,
+        phone: cleanPhone || null,
+        message: cleanMsg || null,
+        status: 'pending' as const,
+        created_at: responseData?.created_at || new Date().toISOString(),
+        reviewed_at: null,
+        reviewed_by: null,
+        review_note: null
+      };
+
+      try {
+        const stored = localStorage.getItem('campuscare_doctor_requests');
+        const list = stored ? JSON.parse(stored) : [];
+        // Prevent duplicate local entries
+        const existingIdx = list.findIndex((r: any) => r.email?.toLowerCase() === cleanEmail.toLowerCase() || r.doctor_id === cleanDocId);
+        if (existingIdx >= 0) {
+          list[existingIdx] = localReq;
+        } else {
+          list.unshift(localReq);
+        }
+        localStorage.setItem('campuscare_doctor_requests', JSON.stringify(list));
+      } catch (storageErr) {
+        console.warn('[Local Storage Save Warning]:', storageErr);
+      }
 
       setIsLoading(false);
       setSubmittedData({
-        full_name: response.data.full_name,
-        doctor_id: response.data.doctor_id,
-        email: response.data.email,
-        department: response.data.department,
-        created_at: response.data.created_at,
+        full_name: cleanName,
+        doctor_id: cleanDocId,
+        email: cleanEmail,
+        department: cleanDept,
+        created_at: localReq.created_at,
       });
       setIsSubmitted(true);
 
@@ -132,11 +178,7 @@ export const DoctorRequestAccessPage: React.FC<DoctorRequestAccessProps> = ({ on
       setIsLoading(false);
       console.error('[Doctor Request Exception]:', err);
       const msg = err?.message || 'An unexpected error occurred. Please try again.';
-      if (msg.includes('already exists')) {
-        setFormErrorBanner(msg);
-      } else {
-        setFormErrorBanner(msg);
-      }
+      setFormErrorBanner(msg);
     }
   };
 

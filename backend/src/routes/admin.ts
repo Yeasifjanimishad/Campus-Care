@@ -14,8 +14,7 @@ router.get('/users', requireAuth, requireAdmin, async (req, res, next) => {
     const offset = (pageNum - 1) * limitNum;
 
     try {
-      const authClient = createAuthClient(req.token!);
-      let query = authClient
+      let query = supabaseAdmin
         .from('users')
         .select('*', { count: 'exact' });
 
@@ -132,8 +131,6 @@ router.put('/users/:id/status', requireAuth, requireAdmin, async (req, res, next
 router.get('/stats', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     try {
-      const authClient = createAuthClient(req.token!);
-      
       const [
         { count: total_users },
         { count: students_faculty },
@@ -149,19 +146,19 @@ router.get('/stats', requireAuth, requireAdmin, async (req, res, next) => {
         { count: total_broadcasts },
         { count: total_health_records }
       ] = await Promise.all([
-        authClient.from('users').select('*', { count: 'exact', head: true }),
-        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'student_faculty'),
-        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'doctor'),
-        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'emergency_admin'),
-        authClient.from('users').select('*', { count: 'exact', head: true }).eq('role', 'super_admin'),
-        authClient.from('users').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-        authClient.from('users').select('*', { count: 'exact', head: true }).eq('status', 'suspended'),
-        authClient.from('doctor_access_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-        authClient.from('sos_alerts').select('*', { count: 'exact', head: true }).in('status', ['active', 'acknowledged']),
-        authClient.from('appointments').select('*', { count: 'exact', head: true }).eq('appointment_date', new Date().toISOString().split('T')[0]),
-        authClient.from('incident_reports').select('*', { count: 'exact', head: true }).gte('created_at', new Date().toISOString().split('T')[0] + 'T00:00:00Z'),
-        authClient.from('broadcasts').select('*', { count: 'exact', head: true }),
-        authClient.from('health_records').select('*', { count: 'exact', head: true })
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }),
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).eq('role', 'student_faculty'),
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).eq('role', 'doctor'),
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).eq('role', 'emergency_admin'),
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).eq('role', 'super_admin'),
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).eq('status', 'suspended'),
+        supabaseAdmin.from('doctor_access_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabaseAdmin.from('sos_alerts').select('*', { count: 'exact', head: true }).in('status', ['active', 'acknowledged']),
+        supabaseAdmin.from('appointments').select('*', { count: 'exact', head: true }).eq('appointment_date', new Date().toISOString().split('T')[0]),
+        supabaseAdmin.from('incident_reports').select('*', { count: 'exact', head: true }).gte('created_at', new Date().toISOString().split('T')[0] + 'T00:00:00Z'),
+        supabaseAdmin.from('broadcasts').select('*', { count: 'exact', head: true }),
+        supabaseAdmin.from('health_records').select('*', { count: 'exact', head: true })
       ]);
 
       const data = {
