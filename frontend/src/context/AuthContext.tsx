@@ -10,6 +10,7 @@ interface AuthContextType {
   userProfile: UserProfile | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  doctorLogin: (doctorId: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -190,6 +191,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const doctorLogin = async (doctorIdInput: string, passwordInput: string): Promise<{ success: boolean; error?: string }> => {
+    const cleanId = doctorIdInput.trim();
+
+    if (!cleanId) {
+      return {
+        success: false,
+        error: 'Doctor ID is required',
+      };
+    }
+
+    try {
+      // Call backend API for doctor login
+      const data = await apiFetch('/auth/doctor-login', {
+        method: 'POST',
+        body: JSON.stringify({ doctor_id: cleanId, password: passwordInput })
+      });
+      
+      if (data.session) {
+        localStorage.setItem('campuscare_session_token', data.session.access_token);
+
+        if (isSupabaseConfigured) {
+          try {
+            await supabase.auth.setSession({
+              access_token: data.session.access_token,
+              refresh_token: data.session.refresh_token
+            });
+          } catch (e) {
+            console.warn('[Supabase setSession Notice]:', e);
+          }
+        }
+
+        if (data.user) {
+          const trustedRole = data.user.role as UserRole;
+          setUserProfile({
+            name: data.user.name || 'University User',
+            email: data.user.email,
+            role: trustedRole,
+            roleLabel: getRoleLabel(trustedRole),
+            initials: getInitials(data.user.name, data.user.email),
+            universityId: data.user.university_id || 'N/A',
+            department: data.user.department || undefined,
+            phone: data.user.phone || undefined,
+          });
+        }
+      }
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Invalid Doctor ID or password.',
+      };
+    }
+  };
+
   const logout = async (): Promise<void> => {
     try {
       await apiFetch('/auth/logout', { method: 'POST' });
@@ -215,7 +270,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ session, userProfile, loading, login, logout, refreshProfile }}>
+    <AuthContext.Provider value={{ session, userProfile, loading, login, doctorLogin, logout, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

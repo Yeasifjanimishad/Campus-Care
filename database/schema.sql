@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS public.users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Index for doctor login lookups
+CREATE INDEX IF NOT EXISTS idx_users_university_id_role ON public.users(university_id, role);
+
 -- 2. Doctor Access Requests Table
 CREATE TABLE IF NOT EXISTS public.doctor_access_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
