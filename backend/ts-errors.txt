@@ -1,0 +1,61 @@
+src/index.ts(49,9): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'RequestHandler<ParamsDictionary, any, any, ParsedQs, Record<string, any>>' is not assignable to parameter of type 'PathParams'.
+src/index.ts(90,17): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'RateLimitRequestHandler' is not assignable to parameter of type 'Application<Record<string, any>>'.
+      Type 'RequestHandler<ParamsDictionary, any, any, ParsedQs, Record<string, any>> & { resetKey: (key: string) => void; getKey: (key: string) => ClientRateLimitInfo | ... 1 more ... | undefined; }' is missing the following properties from type 'Application<Record<string, any>>': init, defaultConfiguration, engine, set, and 63 more.
+src/middleware/rateLimiter.ts(10,3): error TS2322: Type '(req: Request, res: Response) => void' is not assignable to type 'RateLimitExceededEventHandler'.
+  Types of parameters 'req' and 'request' are incompatible.
+    Property 'param' is missing in type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>' but required in type 'import("/mnt/Workplace/Campus care/backend/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>'.
+src/middleware/rateLimiter.ts(26,3): error TS2322: Type '(req: Request, res: Response) => void' is not assignable to type 'RateLimitExceededEventHandler'.
+  Types of parameters 'req' and 'request' are incompatible.
+    Property 'param' is missing in type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>' but required in type 'import("/mnt/Workplace/Campus care/backend/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>'.
+src/middleware/rateLimiter.ts(42,3): error TS2322: Type '(req: Request, res: Response) => void' is not assignable to type 'RateLimitExceededEventHandler'.
+  Types of parameters 'req' and 'request' are incompatible.
+    Property 'param' is missing in type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>' but required in type 'import("/mnt/Workplace/Campus care/backend/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>'.
+src/middleware/rateLimiter.ts(56,3): error TS2322: Type '(req: Request) => any' is not assignable to type 'ValueDeterminingMiddleware<string>'.
+  Types of parameters 'req' and 'request' are incompatible.
+    Property 'param' is missing in type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>' but required in type 'import("/mnt/Workplace/Campus care/backend/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>'.
+src/middleware/rateLimiter.ts(62,3): error TS2322: Type '(req: Request, res: Response) => void' is not assignable to type 'RateLimitExceededEventHandler'.
+  Types of parameters 'req' and 'request' are incompatible.
+    Property 'param' is missing in type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>' but required in type 'import("/mnt/Workplace/Campus care/backend/node_modules/@types/express/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>'.
+src/routes/auth.ts(11,12): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'RateLimitRequestHandler' is not assignable to parameter of type 'PathParams'.
+src/routes/doctorRequests.ts(48,18): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'RateLimitRequestHandler' is not assignable to parameter of type 'RequestHandlerParams<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.
+      Type 'RateLimitRequestHandler' is not assignable to type 'RequestHandler<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.
+        Types of parameters 'req' and 'req' are incompatible.
+          Type 'import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>' is not assignable to type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>'.
+            The types of 'app.get' are incompatible between these types.
+              Type '((name: string) => any) & import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").IRouterMatcher<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").Application<Record<string, any>>, any>' is not assignable to type '((name: string) => any) & import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").IRouterMatcher<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").Application<Record<string, any>>, any>'.
+                Type '((name: string) => any) & IRouterMatcher<Application<Record<string, any>>, any>' is not assignable to type 'IRouterMatcher<Application<Record<string, any>>, any>'.
+                  Types of parameters 'name' and 'path' are incompatible.
+                    Type 'PathParams' is not assignable to type 'string'.
+                      Type 'RegExp' is not assignable to type 'string'.
+src/routes/sos.ts(11,63): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'RateLimitRequestHandler' is not assignable to parameter of type 'RequestHandlerParams<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.
+      Type 'RateLimitRequestHandler' is not assignable to type 'RequestHandler<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.
+        Types of parameters 'req' and 'req' are incompatible.
+          Type 'import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>' is not assignable to type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>'.
+            The types of 'app.get' are incompatible between these types.
+              Type '((name: string) => any) & import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").IRouterMatcher<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").Application<Record<string, any>>, any>' is not assignable to type '((name: string) => any) & import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").IRouterMatcher<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").Application<Record<string, any>>, any>'.
+                Type '((name: string) => any) & IRouterMatcher<Application<Record<string, any>>, any>' is not assignable to type 'IRouterMatcher<Application<Record<string, any>>, any>'.
+                  Types of parameters 'name' and 'path' are incompatible.
+                    Type 'PathParams' is not assignable to type 'string'.
+                      Type 'RegExp' is not assignable to type 'string'.
+src/routes/upload.ts(25,48): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'RequestHandler<ParamsDictionary, any, any, ParsedQs, Record<string, any>>' is not assignable to parameter of type 'RequestHandlerParams<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.
+      Type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/index").RequestHandler<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>' is not assignable to type 'import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").RequestHandler<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>'.
+        Types of parameters 'req' and 'req' are incompatible.
+          Type 'import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<string, any>>' is not assignable to type 'import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").Request<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").ParamsDictionary, any, any, qs.ParsedQs, Record<...>>'.
+            The types of 'app.get' are incompatible between these types.
+              Type '((name: string) => any) & import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").IRouterMatcher<import("/mnt/Workplace/Campus care/node_modules/@types/express-serve-static-core/index").Application<Record<string, any>>, any>' is not assignable to type '((name: string) => any) & import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").IRouterMatcher<import("/mnt/Workplace/Campus care/node_modules/@types/express/node_modules/@types/express-serve-static-core/index").Application<Record<string, any>>, any>'.
+                Type '((name: string) => any) & IRouterMatcher<Application<Record<string, any>>, any>' is not assignable to type 'IRouterMatcher<Application<Record<string, any>>, any>'.
+                  Types of parameters 'name' and 'path' are incompatible.
+                    Type 'PathParams' is not assignable to type 'string'.
+                      Type 'RegExp' is not assignable to type 'string'.

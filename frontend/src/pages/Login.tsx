@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, Info, AlertTriangle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, Info, AlertTriangle, User, Stethoscope } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
 import { PageRoute } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -10,9 +10,12 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
-  const { login } = useAuth();
+  const { login, doctorLogin } = useAuth();
+
+  const [loginMode, setLoginMode] = useState<'university' | 'doctor'>('university');
 
   const [email, setEmail] = useState('');
+  const [doctorId, setDoctorId] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -29,18 +32,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     setFormErrorBanner(null);
 
     let hasError = false;
-    const cleanEmail = email.trim();
 
-    // 1. Email validation
-    if (!cleanEmail) {
-      setEmailError('University email is required.');
-      hasError = true;
-    } else if (!cleanEmail.includes('@')) {
-      setEmailError('Please enter a valid email address.');
-      hasError = true;
-    } else if (!isValidUniversityEmail(cleanEmail)) {
-      setEmailError('Please use your official email address');
-      hasError = true;
+    if (loginMode === 'university') {
+      const cleanEmail = email.trim();
+      if (!cleanEmail) {
+        setEmailError('University email is required.');
+        hasError = true;
+      } else if (!cleanEmail.includes('@')) {
+        setEmailError('Please enter a valid email address.');
+        hasError = true;
+      } else if (!isValidUniversityEmail(cleanEmail)) {
+        setEmailError('Please use your official email address');
+        hasError = true;
+      }
+    } else {
+      const cleanId = doctorId.trim();
+      if (!cleanId) {
+        setEmailError('Doctor ID is required.');
+        hasError = true;
+      }
     }
 
     // 2. Password validation
@@ -57,14 +67,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
     setIsLoading(true);
 
     try {
-      const result = await login(cleanEmail, password);
+      let result;
+      if (loginMode === 'university') {
+        result = await login(email.trim(), password);
+      } else {
+        result = await doctorLogin(doctorId.trim(), password);
+      }
 
       setIsLoading(false);
 
       if (result.success) {
         // AuthContext / App.tsx will automatically redirect upon session change
       } else {
-        setFormErrorBanner(result.error || 'Incorrect email or password.');
+        setFormErrorBanner(result.error || 'Incorrect credentials.');
       }
     } catch (err: any) {
       setIsLoading(false);
@@ -93,40 +108,114 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
           </div>
         )}
 
-        {/* Email Field */}
-        <div className="space-y-1">
-          <label htmlFor="login-email" className="text-xs font-semibold text-ink uppercase tracking-wider block">
-            Email Address
-          </label>
-          <div className="relative">
-            <Mail className="w-4 h-4 text-ink-muted absolute left-3.5 top-3.5" />
-            <input
-              id="login-email"
-              type="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                if (emailError) setEmailError('');
-                if (formErrorBanner) setFormErrorBanner(null);
-              }}
-              placeholder={`username${ALLOWED_EMAIL_DOMAIN}`}
-              className="w-full pl-10 pr-4 py-3 bg-background rounded-xl border border-border text-sm text-ink focus:border-primary focus:bg-surface focus-ring transition-all placeholder:text-ink-muted/60"
-            />
-          </div>
-          
-          <p className="text-[12px] text-ink-muted flex items-center gap-1 pt-0.5">
-            <Info className="w-3.5 h-3.5 text-medical shrink-0" />
-            <span>Must end with <strong className="text-ink font-mono font-medium">{ALLOWED_EMAIL_DOMAIN}</strong></span>
-          </p>
-
-          <div className="min-h-[18px]">
-            {emailError && (
-              <p className="text-xs font-medium text-emergency flex items-center gap-1">
-                <span>{emailError}</span>
-              </p>
-            )}
-          </div>
+        {/* Mode Toggle */}
+        <div className="flex p-1 bg-surface rounded-xl border border-border/60 mb-6">
+          <button
+            type="button"
+            onClick={() => {
+              setLoginMode('university');
+              setEmailError('');
+              setPasswordError('');
+              setFormErrorBanner(null);
+            }}
+            className={`flex-1 py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+              loginMode === 'university'
+                ? 'bg-background text-ink shadow-sm border border-border/80'
+                : 'text-ink-muted hover:text-ink hover:bg-background/50'
+            }`}
+          >
+            <User className="w-4 h-4" />
+            <span>Student / Admin</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLoginMode('doctor');
+              setEmailError('');
+              setPasswordError('');
+              setFormErrorBanner(null);
+            }}
+            className={`flex-1 py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all ${
+              loginMode === 'doctor'
+                ? 'bg-medical/10 text-medical shadow-sm border border-medical/20'
+                : 'text-ink-muted hover:text-ink hover:bg-background/50'
+            }`}
+          >
+            <Stethoscope className="w-4 h-4" />
+            <span>Medical Provider</span>
+          </button>
         </div>
+
+        {/* Email or ID Field */}
+        {loginMode === 'university' ? (
+          <div className="space-y-1">
+            <label htmlFor="login-email" className="text-xs font-semibold text-ink uppercase tracking-wider block">
+              Email Address
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-ink-muted absolute left-3.5 top-3.5" />
+              <input
+                id="login-email"
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (emailError) setEmailError('');
+                  if (formErrorBanner) setFormErrorBanner(null);
+                }}
+                placeholder={`username${ALLOWED_EMAIL_DOMAIN}`}
+                className="w-full pl-10 pr-4 py-3 bg-background rounded-xl border border-border text-sm text-ink focus:border-primary focus:bg-surface focus-ring transition-all placeholder:text-ink-muted/60"
+              />
+            </div>
+            
+            <p className="text-[12px] text-ink-muted flex items-center gap-1 pt-0.5">
+              <Info className="w-3.5 h-3.5 text-medical shrink-0" />
+              <span>Must end with <strong className="text-ink font-mono font-medium">{ALLOWED_EMAIL_DOMAIN}</strong></span>
+            </p>
+
+            <div className="min-h-[18px]">
+              {emailError && (
+                <p className="text-xs font-medium text-emergency flex items-center gap-1">
+                  <span>{emailError}</span>
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            <label htmlFor="login-doctor-id" className="text-xs font-semibold text-ink uppercase tracking-wider block">
+              Doctor ID
+            </label>
+            <div className="relative">
+              <User className="w-4 h-4 text-ink-muted absolute left-3.5 top-3.5" />
+              <input
+                id="login-doctor-id"
+                type="text"
+                value={doctorId}
+                onChange={(e) => {
+                  setDoctorId(e.target.value);
+                  if (emailError) setEmailError('');
+                  if (formErrorBanner) setFormErrorBanner(null);
+                }}
+                placeholder="e.g. DOC-2024-XXXX"
+                className="w-full pl-10 pr-4 py-3 bg-background rounded-xl border border-border text-sm text-ink focus:border-medical focus:bg-surface focus-ring transition-all placeholder:text-ink-muted/60"
+              />
+            </div>
+            
+            <p className="text-[12px] text-ink-muted flex items-center gap-1 pt-0.5">
+              <Info className="w-3.5 h-3.5 text-medical shrink-0" />
+              <span>Enter your officially assigned Medical ID</span>
+            </p>
+
+            <div className="min-h-[18px]">
+              {emailError && (
+                <p className="text-xs font-medium text-emergency flex items-center gap-1">
+                  <span>{emailError}</span>
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Password Field */}
         <div className="space-y-1">
@@ -226,7 +315,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
             <button
               type="button"
               onClick={() => {
-                setEmail('doctor@diu.edu.bd');
+                setLoginMode('doctor');
+                setDoctorId('DOC-2024-001');
                 setPassword('Password123!');
               }}
               className="px-2.5 py-1.5 rounded-lg bg-background hover:bg-medical/10 text-ink hover:text-medical font-medium text-center border border-border/60 transition-colors cursor-pointer"

@@ -15,7 +15,7 @@ export const defaultRateLimiter = rateLimit({
       }
     });
   }
-});
+}) as any;
 
 // 2. Auth Endpoints Rate Limiter: 10 login / signup attempts per 15 minutes per IP
 export const authRateLimiter = rateLimit({
@@ -31,7 +31,7 @@ export const authRateLimiter = rateLimit({
       }
     });
   }
-});
+}) as any;
 
 // 3. Public Endpoints (e.g. Doctor Request Access): 5 requests per hour per IP
 export const publicEndpointLimiter = rateLimit({
@@ -47,7 +47,7 @@ export const publicEndpointLimiter = rateLimit({
       }
     });
   }
-});
+}) as any;
 
 // 4. SOS Endpoint Rate Limiter: 3 requests per minute per user (to prevent spam)
 export const sosRateLimiter = rateLimit({
@@ -67,4 +67,4 @@ export const sosRateLimiter = rateLimit({
       }
     });
   }
-});
+}) as any;

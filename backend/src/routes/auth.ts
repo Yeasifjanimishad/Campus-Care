@@ -113,6 +113,7 @@ router.post('/login', validateBody(loginSchema), async (req, res, next) => {
 router.post('/doctor-login', validateBody(doctorLoginSchema), async (req, res, next) => {
   try {
     const { doctor_id, password } = req.body;
+    console.log('[DEBUG] doctor-login requested with:', { doctor_id });
     
     // 1. Look up the doctor's email using university_id (where doctor_id is stored)
     const { data: profile, error: profileError } = await supabaseAdmin
@@ -123,7 +124,7 @@ router.post('/doctor-login', validateBody(doctorLoginSchema), async (req, res, n
       .single();
       
     if (profileError || !profile) {
-      throw new AppError(404, 'Doctor profile not found. Please check your Doctor ID.');
+      throw new AppError(404, `Doctor profile not found. ID: ${doctor_id}. DB Error: ${profileError?.message || 'null'}, Profile: ${profile ? 'exists' : 'null'}`);
     }
     
     if (profile.status !== 'active' && profile.status !== 'pending') {
